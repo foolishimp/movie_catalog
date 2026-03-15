@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Media Catalog{% endblock %}</title>
+    <style>
+        :root {
+            --bg: #0f0f0f;
+            --surface: #1a1a2e;
+            --surface2: #16213e;
+            --accent: #e94560;
+            --accent2: #0f3460;
+            --text: #eee;
+            --text-dim: #999;
+            --border: #333;
+            --green: #4ecca3;
+            --yellow: #ffd369;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        nav {
+            background: var(--surface);
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        nav .logo { font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+        nav a { color: var(--text-dim); font-size: 0.95rem; }
+        nav a:hover, nav a.active { color: var(--text); text-decoration: none; }
+
+        .search-bar {
+            margin-left: auto;
+            display: flex;
+            gap: 0.5rem;
+        }
+        .search-bar input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            width: 280px;
+        }
+        .search-bar button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: var(--surface);
+            padding: 1.2rem;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .stat-card .number { font-size: 1.8rem; font-weight: 700; color: var(--accent); }
+        .stat-card .label { font-size: 0.8rem; color: var(--text-dim); text-transform: uppercase; }
+
+        .section-title {
+            font-size: 1.3rem;
+            margin: 2rem 0 1rem;
+            color: var(--text);
+        }
+
+        .media-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1.2rem;
+        }
+        .media-card {
+            background: var(--surface);
+            border-radius: 10px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .media-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        }
+        .media-card a { color: inherit; }
+        .media-card .poster {
+            width: 100%;
+            aspect-ratio: 2/3;
+            object-fit: cover;
+            background: var(--surface2);
+            display: block;
+        }
+        .media-card .no-poster {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: var(--surface2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-dim);
+            font-size: 2rem;
+        }
+        .media-card .info {
+            padding: 0.8rem;
+        }
+        .media-card .info h3 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .media-card .info .meta {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.3rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-movie { background: var(--accent2); color: #7ec8e3; }
+        .badge-series { background: #1b4332; color: var(--green); }
+        .badge-unknown { background: #333; color: #999; }
+
+        .rating {
+            color: var(--yellow);
+            font-weight: 600;
+        }
+
+        .tag {
+            display: inline-block;
+            background: var(--accent2);
+            color: var(--text);
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            margin: 0.15rem;
+        }
+        .tag-genre { background: #2d1b4e; color: #c39bd3; }
+        .tag-resolution { background: #1b3a4b; color: #89cff0; }
+
+        .filters {
+            background: var(--surface);
+            padding: 1rem 1.5rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+            align-items: center;
+        }
+        .filters select, .filters input {
+            background: var(--bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+        .filters label {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+        .filters button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.4rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 2rem;
+        }
+        .pagination a, .pagination span {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        .pagination a { background: var(--surface); color: var(--text); }
+        .pagination a:hover { background: var(--accent2); text-decoration: none; }
+        .pagination .current { background: var(--accent); color: white; }
+
+        .detail-header {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        .detail-header .poster-large {
+            width: 300px;
+            border-radius: 10px;
+            flex-shrink: 0;
+        }
+        .detail-header .info { flex: 1; }
+        .detail-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+        .detail-header .tagline { color: var(--text-dim); font-style: italic; margin-bottom: 1rem; }
+        .detail-header .overview { margin: 1rem 0; line-height: 1.8; }
+
+        .detail-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        .detail-meta dt { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; }
+        .detail-meta dd { font-size: 1rem; margin-bottom: 0.8rem; }
+
+        .file-info {
+            background: var(--surface);
+            padding: 1.2rem;
+            border-radius: 10px;
+            margin: 1.5rem 0;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.8rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        th { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; }
+        tr:hover { background: var(--surface); }
+
+        .dupe-group {
+            background: var(--surface);
+            border-radius: 10px;
+            padding: 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .dupe-group h3 { margin-bottom: 0.5rem; }
+        .dupe-group .paths {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+        .dupe-group .paths li {
+            list-style: none;
+            padding: 0.3rem 0;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-dim);
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
+
+        @media (max-width: 768px) {
+            nav { flex-wrap: wrap; gap: 1rem; }
+            .search-bar { margin-left: 0; width: 100%; }
+            .search-bar input { flex: 1; }
+            .detail-header { flex-direction: column; }
+            .detail-header .poster-large { width: 100%; max-width: 300px; }
+            .media-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="logo">🎬 Media Catalog</span>
+        <a href="/">Dashboard</a>
+        <a href="/browse">Browse</a>
+        <a href="/series">Series</a>
+        <a href="/duplicates">Duplicates</a>
+        <a href="/browse?unenriched=1">Unenriched</a>
+        <form class="search-bar" action="/browse" method="get">
+            <input type="text" name="q" placeholder="Search titles, plots, directors..." value="{{ request.query_params.get('q', '') }}">
+            <button type="submit">Search</button>
+        </form>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

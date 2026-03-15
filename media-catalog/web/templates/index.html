@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Media Catalog — Dashboard{% endblock %}
+{% block content %}
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="number">{{ stats.get('total_entries', 0) | default(0) }}</div>
+        <div class="label">Total Entries</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">{{ stats.get('movies', 0) | default(0) }}</div>
+        <div class="label">Movies</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">{{ stats.get('series', 0) | default(0) }}</div>
+        <div class="label">Series</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">{{ stats.get('enriched', 0) | default(0) }}</div>
+        <div class="label">With Metadata</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">{{ stats.get('duplicate_groups', 0) | default(0) }}</div>
+        <div class="label">Duplicate Groups</div>
+    </div>
+    <div class="stat-card">
+        <div class="number">{{ stats.get('total_size', '0 bytes') }}</div>
+        <div class="label">Total Size</div>
+    </div>
+</div>
+
+{% if genres %}
+<h2 class="section-title">Top Genres</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;">
+    {% for g in genres %}
+    <a href="/browse?genre={{ g.genre }}" class="tag tag-genre">{{ g.genre }} ({{ g.cnt }})</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if years %}
+<h2 class="section-title">By Decade</h2>
+<div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem;">
+    {% for y in years %}
+    <a href="/browse?year_decade={{ y.decade }}" class="tag">{{ y.decade }}s ({{ y.cnt }})</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if recent %}
+<h2 class="section-title">Recently Added</h2>
+<div class="media-grid">
+    {% for item in recent %}
+    <div class="media-card">
+        <a href="/detail/{{ item.id }}">
+            {% if item.poster_path %}
+            <img class="poster" src="{{ item.poster_path if item.poster_path.startswith('http') else tmdb_img + '/w342' + item.poster_path }}" alt="{{ item.title }}" loading="lazy">
+            {% else %}
+            <div class="no-poster">🎬</div>
+            {% endif %}
+            <div class="info">
+                <h3>{{ item.title }}</h3>
+                <div class="meta">
+                    <span>{{ item.year or '?' }}</span>
+                    <span class="badge badge-{{ item.media_type }}">{{ item.media_type }}</span>
+                    {% if item.vote_average %}
+                    <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if not stats.get('total_entries') %}
+<div class="empty-state">
+    <div class="icon">📂</div>
+    <h2>No media cataloged yet</h2>
+    <p style="margin-top: 1rem;">Run the scanner to get started:</p>
+    <code style="display: block; margin-top: 0.5rem; color: var(--green);">
+        python -m scanner.scan /Volumes/Multimedia/Movies /Volumes/Multimedia/Series
+    </code>
+</div>
+{% endif %}
+
+{% endblock %}

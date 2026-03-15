@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}{{ entry.title }} — Media Catalog{% endblock %}
+{% block content %}
+
+<div class="detail-header">
+    {% if entry.poster_path %}
+    <img class="poster-large" src="{{ entry.poster_path if entry.poster_path.startswith('http') else tmdb_img + '/w500' + entry.poster_path }}" alt="{{ entry.title }}">
+    {% endif %}
+    <div class="info">
+        <h1>{{ entry.title }}{% if entry.year %} <span style="color: var(--text-dim); font-weight: 400;">({{ entry.year }})</span>{% endif %}</h1>
+        <div class="card-actions" style="margin: 0.75rem 0; justify-content: flex-start;">
+            <button class="card-btn" id="vlc-btn" data-id="{{ entry.id }}">▶ VLC</button>
+            <button class="card-btn" id="copy-dir-btn" data-id="{{ entry.id }}">📂 Reveal</button>
+            <button class="card-btn" id="copy-link-btn" data-url="{{ request.url }}">🔗 Link</button>
+            {% if entry.imdb_id %}
+            <a class="card-btn" href="https://www.imdb.com/title/{{ entry.imdb_id }}/" target="_blank">IMDb ↗</a>
+            {% else %}
+            <a class="card-btn" href="https://www.imdb.com/find/?q={{ entry.title | urlencode }}{% if entry.year %}+{{ entry.year }}{% endif %}&s=tt" target="_blank">IMDb ↗</a>
+            {% endif %}
+        </div>
+
+        <span class="badge badge-{{ entry.media_type }}">{{ entry.media_type }}</span>
+        {% if entry.vote_average %}
+        <span class="rating" style="margin-left: 1rem; font-size: 1.2rem;">★ {{ "%.1f"|format(entry.vote_average) }}</span>
+        <span style="color: var(--text-dim); font-size: 0.85rem;">({{ entry.vote_count or 0 }} votes)</span>
+        {% endif %}
+
+        {% if entry.tagline %}
+        <p class="tagline">{{ entry.tagline }}</p>
+        {% endif %}
+
+        {% if entry.genres %}
+        <div style="margin: 1rem 0;">
+            {% for g in entry.genres %}
+            <a href="/browse?genre={{ g }}" class="tag tag-genre">{{ g }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if entry.overview %}
+        <p class="overview">{{ entry.overview }}</p>
+        {% endif %}
+
+        <div class="detail-meta">
+            {% if entry.director %}
+            <div><dt>Director / Creator</dt><dd><a href="/browse?director={{ entry.director | urlencode }}">{{ entry.director }}</a> <a href="https://www.imdb.com/find/?q={{ entry.director | urlencode }}&s=nm" target="_blank" class="imdb-link">IMDb ↗</a></dd></div>
+            {% endif %}
+            {% if entry.runtime_minutes %}
+            <div><dt>Runtime</dt><dd>{{ entry.runtime_minutes }} min</dd></div>
+            {% endif %}
+            {% if entry.original_language %}
+            <div><dt>Language</dt><dd>{{ entry.original_language | upper }}</dd></div>
+            {% endif %}
+            {% if entry.release_date %}
+            <div><dt>Release Date</dt><dd>{{ entry.release_date }}</dd></div>
+            {% endif %}
+            {% if entry.status %}
+            <div><dt>Status</dt><dd>{{ entry.status }}</dd></div>
+            {% endif %}
+            {% if entry.imdb_id %}
+            <div><dt>IMDb</dt><dd><a href="https://www.imdb.com/title/{{ entry.imdb_id }}/" target="_blank">{{ entry.imdb_id }}</a></dd></div>
+            {% endif %}
+            {% if entry.tmdb_id %}
+            <div><dt>TMDb</dt><dd><a href="https://www.themoviedb.org/{{ entry.media_type if entry.media_type != 'unknown' else 'movie' }}/{{ entry.tmdb_id }}" target="_blank">{{ entry.tmdb_id }}</a></dd></div>
+            {% endif %}
+        </div>
+
+        {% if entry.cast_names %}
+        <div style="margin-top: 1rem;">
+            <dt style="color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; margin-bottom: 0.3rem;">Cast</dt>
+            <dd>{% for name in entry.cast_names %}<a href="/browse?actor={{ name | urlencode }}" style="color: var(--text);">{{ name }}</a> <a href="https://www.imdb.com/find/?q={{ name | urlencode }}&s=nm" target="_blank" class="imdb-link">↗</a>{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+        </div>
+        {% endif %}
+
+        {% if entry.tags %}
+        <div style="margin-top: 1rem;">
+            <dt style="color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; margin-bottom: 0.3rem;">Tags</dt>
+            <dd>
+                {% for t in entry.tags %}
+                <span class="tag">{{ t }}</span>
+                {% endfor %}
+            </dd>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<h2 class="section-title">File Info</h2>
+<div class="file-info">
+    <table style="width: 100%; border: none;">
+        <tr><td style="width: 120px; color: var(--text-dim); border: none;">Path</td><td style="border: none;">{{ entry.file_path }}</td></tr>
+        <tr><td style="color: var(--text-dim); border: none;">Size</td><td style="border: none;">{{ "%.2f"|format(entry.file_size_bytes / 1073741824) }} GB</td></tr>
+        <tr><td style="color: var(--text-dim); border: none;">Resolution</td><td style="border: none;">{{ entry.resolution or '—' }}</td></tr>
+        <tr><td style="color: var(--text-dim); border: none;">Codec</td><td style="border: none;">{{ entry.codec or '—' }}</td></tr>
+        <tr><td style="color: var(--text-dim); border: none;">Source</td><td style="border: none;">{{ entry.source or '—' }}</td></tr>
+        <tr><td style="color: var(--text-dim); border: none;">Extension</td><td style="border: none;">{{ entry.file_ext }}</td></tr>
+    </table>
+</div>
+
+{% if dupes %}
+<h2 class="section-title" style="color: var(--yellow);">⚠ {{ dupes | length }} Duplicate{{ 's' if dupes | length > 1 }} Found</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Path</th>
+            <th>Size</th>
+            <th>Resolution</th>
+            <th>Codec</th>
+            <th>Source</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in dupes %}
+        <tr>
+            <td style="font-family: monospace; font-size: 0.8rem;">
+                <a href="/detail/{{ d.id }}">{{ d.file_path }}</a>
+            </td>
+            <td>{{ "%.2f"|format(d.file_size_bytes / 1073741824) }} GB</td>
+            <td>{{ d.resolution or '—' }}</td>
+            <td>{{ d.codec or '—' }}</td>
+            <td>{{ d.source or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<style>
+.card-actions { display: flex; gap: 0.4rem; }
+.card-btn { font-size: 0.8rem; padding: 0.3rem 0.8rem; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+.card-btn:hover { color: var(--text); border-color: #888; }
+.imdb-link { font-size: 0.75rem; color: var(--text-dim); text-decoration: none; opacity: 0.6; }
+.imdb-link:hover { opacity: 1; color: #f5c518; }
+</style>
+<script>
+document.getElementById('vlc-btn').addEventListener('click', function() {
+    fetch('/api/open/' + this.dataset.id, {method: 'POST'}).then(() => {
+        this.textContent = '▶ Playing';
+        setTimeout(() => this.textContent = '▶ VLC', 2000);
+    });
+});
+document.getElementById('copy-dir-btn').addEventListener('click', function() {
+    fetch('/api/reveal/' + this.dataset.id, {method: 'POST'}).then(() => {
+        this.textContent = '✓ Opened';
+        setTimeout(() => this.textContent = '📂 Reveal', 2000);
+    });
+});
+document.getElementById('copy-link-btn').addEventListener('click', function() {
+    navigator.clipboard.writeText(this.dataset.url).then(() => {
+        this.textContent = 'Copied!';
+        setTimeout(() => this.textContent = '🔗 Link', 1500);
+    });
+});
+</script>
+{% endblock %}

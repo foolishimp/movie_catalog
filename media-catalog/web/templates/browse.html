@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Browse — Media Catalog{% endblock %}
+{% block content %}
+
+<form class="filters" method="get" action="/browse">
+    <input type="hidden" name="q" value="{{ params.get('q', '') }}">
+
+    <div>
+        <label>Type</label><br>
+        <select name="type">
+            <option value="">All</option>
+            <option value="movie" {{ 'selected' if params.get('type') == 'movie' }}>Movies</option>
+            <option value="series" {{ 'selected' if params.get('type') == 'series' }}>Series</option>
+        </select>
+    </div>
+
+    <div>
+        <label>Genre</label><br>
+        <select name="genre">
+            <option value="">All</option>
+            {% for g in genres %}
+            <option value="{{ g.genre }}" {{ 'selected' if params.get('genre') == g.genre }}>{{ g.genre }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div>
+        <label>Year</label><br>
+        <input type="number" name="year" value="{{ params.get('year', '') }}" placeholder="e.g. 2023" style="width: 100px;">
+    </div>
+
+    <div>
+        <label>Min Rating</label><br>
+        <input type="number" name="min_rating" value="{{ params.get('min_rating', '') }}" placeholder="e.g. 7" step="0.5" min="0" max="10" style="width: 80px;">
+    </div>
+
+    <div>
+        <label>Director</label><br>
+        <input type="text" name="director" value="{{ params.get('director', '') }}" placeholder="e.g. Nolan">
+    </div>
+
+    <div>
+        <label>Actor</label><br>
+        <input type="text" name="actor" value="{{ params.get('actor', '') }}" placeholder="e.g. Hanks">
+    </div>
+
+    <div>
+        <label>Sort</label><br>
+        <select name="sort">
+            <option value="title" {{ 'selected' if params.get('sort') == 'title' }}>Title A-Z</option>
+            <option value="year" {{ 'selected' if params.get('sort') == 'year' }}>Year (newest)</option>
+            <option value="rating" {{ 'selected' if params.get('sort') == 'rating' }}>Rating</option>
+            <option value="popularity" {{ 'selected' if params.get('sort') == 'popularity' }}>Popularity</option>
+            <option value="size" {{ 'selected' if params.get('sort') == 'size' }}>File Size</option>
+            <option value="recent" {{ 'selected' if params.get('sort') == 'recent' }}>Recently Added</option>
+        </select>
+    </div>
+
+    <button type="submit">Filter</button>
+    <a href="/browse" style="font-size: 0.85rem; color: var(--text-dim);">Clear</a>
+</form>
+
+<p style="color: var(--text-dim); margin-bottom: 1rem;">
+    {{ total }} result{{ 's' if total != 1 }} found
+    {% if params.get('q') %} for "<strong>{{ params.q }}</strong>"{% endif %}
+</p>
+
+{% if results %}
+<div class="media-grid">
+    {% for item in results %}
+    <div class="media-card">
+        <a href="/detail/{{ item.id }}">
+            {% if item.poster_path %}
+            <img class="poster" src="{{ item.poster_path if item.poster_path.startswith('http') else tmdb_img + '/w342' + item.poster_path }}" alt="{{ item.title }}" loading="lazy">
+            {% else %}
+            <div class="no-poster">🎬</div>
+            {% endif %}
+            <div class="info">
+                <h3>{{ item.title }}{% if item.season %}  <span style="color: var(--text-dim); font-weight: 400; font-size: 0.85em;">S{{ '%02d'|format(item.season) }}{% if item.episode %}E{{ '%02d'|format(item.episode) }}{% endif %}</span>{% endif %}</h3>
+                <div class="meta">
+                    <span>{{ item.year or '?' }}</span>
+                    <span class="badge badge-{{ item.media_type }}">{{ item.media_type }}</span>
+                    {% if item.vote_average %}
+                    <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
+                    {% endif %}
+                </div>
+                {% if item.resolution %}
+                <span class="tag tag-resolution" style="margin-top: 0.3rem;">{{ item.resolution }}</span>
+                {% endif %}
+            </div>
+        </a>
+        <div class="card-actions">
+            <button class="card-btn" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            <button class="card-btn" data-url="{{ request.url.scheme }}://{{ request.url.netloc }}/detail/{{ item.id }}" onclick="copyLink(event,this)">🔗 Link</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ page - 1 }}">← Prev</a>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <span class="current">{{ p }}</span>
+        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+        <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ p }}">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}
+        <span style="color: var(--text-dim);">…</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ page + 1 }}">Next →</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="icon">🔍</div>
+    <h2>No results found</h2>
+    <p style="margin-top: 0.5rem;">Try adjusting your filters or search terms.</p>
+</div>
+{% endif %}
+
+<style>
+.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
+.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+.card-btn:hover { color: var(--text); border-color: #888; }
+</style>
+<script>
+function openVlc(e, btn) {
+    e.preventDefault();
+    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(() => {
+        btn.textContent = '▶ Playing';
+        setTimeout(() => btn.textContent = '▶ VLC', 2000);
+    });
+}
+function revealInFinder(e, btn) {
+    e.preventDefault();
+    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(() => {
+        btn.textContent = '✓ Opened';
+        setTimeout(() => btn.textContent = '📂 Reveal', 2000);
+    });
+}
+function copyLink(e, btn) {
+    e.preventDefault();
+    navigator.clipboard.writeText(btn.dataset.url).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = '🔗 Link', 1500);
+    });
+}
+</script>
+{% endblock %}
