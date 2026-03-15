@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ show_info.title or show }} — Seasons{% endblock %}
+{% block content %}
+
+<div style="margin-bottom: 1.5rem;">
+    <a href="/series" style="color: var(--text-dim); font-size: 0.9rem;">← All Series</a>
+</div>
+
+<div class="detail-header">
+    {% if show_info.poster_path %}
+    <img class="poster-large" src="{{ show_info.poster_path if show_info.poster_path.startswith('http') else tmdb_img + '/w300' + show_info.poster_path }}" alt="{{ show_info.title }}">
+    {% endif %}
+    <div class="info">
+        <h1>{{ show_info.title or show }}</h1>
+        {% if show_info.vote_average %}
+        <span class="rating" style="font-size: 1.1rem;">★ {{ "%.1f"|format(show_info.vote_average) }}</span>
+        {% endif %}
+        {% if show_info.overview %}
+        <p class="overview" style="margin-top: 0.75rem;">{{ show_info.overview }}</p>
+        {% endif %}
+    </div>
+</div>
+
+<h2 class="section-title">{{ seasons | length }} Season{{ 's' if seasons | length != 1 }}</h2>
+
+<div style="display: flex; flex-direction: column; gap: 0.5rem; max-width: 600px;">
+    {% for s in seasons %}
+    <a href="/series?show={{ show | urlencode }}&season={{ s.season or 0 }}"
+       style="display: flex; justify-content: space-between; align-items: center;
+              padding: 0.75rem 1rem; background: var(--surface); border-radius: 6px;
+              border: 1px solid var(--border); color: var(--text); text-decoration: none;">
+        <span style="font-size: 1rem;">
+            {% if s.season %}Season {{ s.season }}{% else %}Unknown Season{% endif %}
+        </span>
+        <span style="color: var(--text-dim); font-size: 0.85rem;">{{ s.episode_count }} episode{{ 's' if s.episode_count != 1 }}</span>
+    </a>
+    {% endfor %}
+</div>
+
+{% endblock %}

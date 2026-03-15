@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ show_info.title or show }} — Season {{ season }}{% endblock %}
+{% block content %}
+
+<div style="margin-bottom: 0.5rem;">
+    <a href="/series" style="color: var(--text-dim); font-size: 0.9rem;">← All Series</a>
+    <span style="color: var(--text-dim);"> / </span>
+    <a href="/series?show={{ show | urlencode }}" style="color: var(--text-dim); font-size: 0.9rem;">{{ show_info.title or show }}</a>
+</div>
+
+<h2 class="section-title">Season {{ season }} — {{ episodes | length }} Episodes</h2>
+
+<div style="display: flex; flex-direction: column; gap: 0.4rem;">
+    {% for ep in episodes %}
+    <div style="display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1rem;
+                background: var(--surface); border-radius: 6px; border: 1px solid var(--border);">
+        <span style="color: var(--text-dim); font-size: 0.85rem; min-width: 3.5rem;">
+            {% if ep.episode %}E{{ '%02d'|format(ep.episode) }}{% else %}—{% endif %}
+        </span>
+        <a href="/detail/{{ ep.id }}" style="flex: 1; color: var(--text); font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {{ ep.file_path | replace(ep.directory + '/', '') }}
+        </a>
+        <span style="color: var(--text-dim); font-size: 0.75rem; white-space: nowrap;">
+            {% if ep.resolution %}{{ ep.resolution }}{% endif %}
+            {% if ep.file_size_bytes %} · {{ "%.1f"|format(ep.file_size_bytes / 1073741824) }}GB{% endif %}
+        </span>
+        <div style="display: flex; gap: 0.3rem; flex-shrink: 0;">
+            <button class="card-btn" data-id="{{ ep.id }}" onclick="openVlc(event,this)">▶</button>
+            <button class="card-btn" data-dir="{{ ep.directory }}" onclick="copyDir(event,this)">📋</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+.card-btn { font-size: 0.75rem; padding: 0.2rem 0.5rem; background: var(--surface2); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+.card-btn:hover { color: var(--text); border-color: #888; }
+</style>
+<script>
+function openVlc(e, btn) {
+    e.preventDefault();
+    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(() => {
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = '▶', 2000);
+    });
+}
+function copyDir(e, btn) {
+    e.preventDefault();
+    navigator.clipboard.writeText(btn.dataset.dir).then(() => {
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = '📋', 1500);
+    });
+}
+</script>
+{% endblock %}

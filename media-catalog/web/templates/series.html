@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Series — Media Catalog{% endblock %}
+{% block content %}
+
+<form method="get" action="/series" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search series..." style="flex: 1; max-width: 400px;">
+    <button type="submit">Search</button>
+    {% if q %}<a href="/series" style="line-height: 2.2rem; color: var(--text-dim);">Clear</a>{% endif %}
+</form>
+
+<p style="color: var(--text-dim); margin-bottom: 1rem;">{{ total }} series{{ ' matching "' + q + '"' if q else '' }}</p>
+
+{% if results %}
+<div class="media-grid">
+    {% for item in results %}
+    <div class="media-card">
+        <a href="/series?show={{ item.norm_title | urlencode }}">
+            {% if item.poster_path %}
+            <img class="poster" src="{{ item.poster_path if item.poster_path.startswith('http') else tmdb_img + '/w342' + item.poster_path }}" alt="{{ item.title }}" loading="lazy">
+            {% else %}
+            <div class="no-poster">📺</div>
+            {% endif %}
+            <div class="info">
+                <h3>{{ item.title }}</h3>
+                <div class="meta">
+                    <span>{{ item.year or '?' }}</span>
+                    {% if item.season_count > 1 %}
+                    <span style="color: var(--text-dim);">{{ item.season_count }} seasons</span>
+                    {% endif %}
+                    <span style="color: var(--text-dim);">{{ item.episode_count }} ep</span>
+                    {% if item.vote_average %}
+                    <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </a>
+        <div class="card-actions">
+            <button class="card-btn" data-dir="{{ item.directory }}" onclick="copyDir(event,this)">📋 Folder</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}<a href="/series?q={{ q }}&page={{ page - 1 }}">← Prev</a>{% endif %}
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}<span class="current">{{ p }}</span>
+        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+        <a href="/series?q={{ q }}&page={{ p }}">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}<span style="color: var(--text-dim);">…</span>{% endif %}
+    {% endfor %}
+    {% if page < total_pages %}<a href="/series?q={{ q }}&page={{ page + 1 }}">Next →</a>{% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <div class="icon">📺</div>
+    <h2>No series found</h2>
+</div>
+{% endif %}
+
+<style>
+.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
+.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+.card-btn:hover { color: var(--text); border-color: #888; }
+</style>
+<script>
+function copyDir(e, btn) {
+    e.preventDefault();
+    navigator.clipboard.writeText(btn.dataset.dir).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = '📋 Folder', 1500);
+    });
+}
+</script>
+{% endblock %}

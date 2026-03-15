@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: media_catalog
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://catalog:catalog@db:5432/media_catalog
+      TMDB_API_KEY: ${TMDB_API_KEY}
+    volumes:
+      - ./:/app
+    command: python -m uvicorn web.app:app --host 0.0.0.0 --port 8080 --reload
+
+volumes:
+  pgdata:

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Duplicates — Media Catalog{% endblock %}
+{% block content %}
+
+<h1 style="margin-bottom: 0.5rem;">Duplicate Detection</h1>
+<p style="color: var(--text-dim); margin-bottom: 2rem;">
+    {{ dupes | length }} duplicate group{{ 's' if dupes | length != 1 }} found —
+    estimated <strong style="color: var(--yellow);">{{ waste }}</strong> of reclaimable space
+</p>
+
+{% if dupes %}
+{% for group in dupes %}
+<div class="dupe-group">
+    <h3>
+        {{ group.norm_title | title }}
+        {% if group.year %}<span style="color: var(--text-dim);">({{ group.year }})</span>{% endif %}
+        <span class="badge badge-{{ group.media_type }}">{{ group.media_type }}</span>
+        <span style="color: var(--yellow); font-size: 0.85rem; margin-left: 0.5rem;">{{ group.copy_count }} copies</span>
+    </h3>
+    <ul class="paths">
+        {% for i in range(group.paths | length) %}
+        <li>
+            <a href="/detail/{{ group.ids[i] }}" style="flex: 1; font-size: 0.8rem;">{{ group.paths[i] }}</a>
+            <span style="min-width: 80px; text-align: right;">
+                {{ "%.2f"|format(group.sizes[i] / 1073741824) }} GB
+                {% if group.resolutions[i] %}
+                <span class="tag tag-resolution" style="margin-left: 0.3rem;">{{ group.resolutions[i] }}</span>
+                {% endif %}
+            </span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="empty-state">
+    <div class="icon">✅</div>
+    <h2>No duplicates found</h2>
+    <p style="margin-top: 0.5rem;">Your collection looks clean!</p>
+</div>
+{% endif %}
+
+{% endblock %}
