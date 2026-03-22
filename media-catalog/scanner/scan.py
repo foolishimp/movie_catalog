@@ -78,6 +78,12 @@ def parse_filename(filepath: Path) -> dict:
             if not year:
                 year = dir_info.get("year")
 
+    # Strip leading disc/file-number prefix like "1 The Larry Sanders Show" → "The Larry Sanders Show"
+    # Only strip when followed by an article (The/A/An) to avoid breaking titles like "30 Rock"
+    title_stripped = _re.sub(r'^\d{1,2} (?=The |A |An )', '', str(title)).strip()
+    if title_stripped and title_stripped != str(title):
+        title = title_stripped
+
     return {
         "title": title,
         "parsed_title": title,

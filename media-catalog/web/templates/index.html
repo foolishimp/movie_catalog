@@ -59,7 +59,7 @@
             <div class="no-poster">🎬</div>
             {% endif %}
             <div class="info">
-                <h3>{{ item.title }}</h3>
+                <h3>{{ item.title }}{% if item.season %} <span style="color: var(--text-dim); font-weight: 400; font-size: 0.85em;">S{{ '%02d'|format(item.season) }}{% if item.episode %}E{{ '%02d'|format(item.episode) }}{% endif %}</span>{% endif %}</h3>
                 <div class="meta">
                     <span>{{ item.year or '?' }}</span>
                     <span class="badge badge-{{ item.media_type }}">{{ item.media_type }}</span>
@@ -67,8 +67,16 @@
                     <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
                     {% endif %}
                 </div>
+                {% if item.resolution %}
+                <span class="tag tag-resolution" style="margin-top: 0.3rem;">{{ item.resolution }}</span>
+                {% endif %}
             </div>
         </a>
+        <div class="card-actions">
+            <button class="card-btn" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            <button class="card-btn" data-url="{{ request.url.scheme }}://{{ request.url.netloc }}/detail/{{ item.id }}" onclick="copyLink(event,this)">🔗 Link</button>
+        </div>
     </div>
     {% endfor %}
 </div>
@@ -84,5 +92,34 @@
     </code>
 </div>
 {% endif %}
+
+<style>
+.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
+.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+.card-btn:hover { color: var(--text); border-color: #888; }
+</style>
+<script>
+function openVlc(e, btn) {
+    e.preventDefault();
+    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(() => {
+        btn.textContent = '▶ Playing';
+        setTimeout(() => btn.textContent = '▶ VLC', 2000);
+    });
+}
+function revealInFinder(e, btn) {
+    e.preventDefault();
+    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(() => {
+        btn.textContent = '✓ Opened';
+        setTimeout(() => btn.textContent = '📂 Reveal', 2000);
+    });
+}
+function copyLink(e, btn) {
+    e.preventDefault();
+    navigator.clipboard.writeText(btn.dataset.url).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = '🔗 Link', 1500);
+    });
+}
+</script>
 
 {% endblock %}
