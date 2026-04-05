@@ -20,6 +20,7 @@ services:
     environment:
       DATABASE_URL: postgresql://catalog:catalog@db:5432/media_catalog
       TMDB_API_KEY: ${TMDB_API_KEY}
+      HOST_OPENER_URL: http://host.docker.internal:9111
     volumes:
       - ./:/app
     command: python -m uvicorn web.app:app --host 0.0.0.0 --port 8080 --reload

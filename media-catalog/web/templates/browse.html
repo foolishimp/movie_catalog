@@ -58,6 +58,14 @@
 
     <button type="submit">Filter</button>
     <a href="/browse" style="font-size: 0.85rem; color: var(--text-dim);">Clear</a>
+
+    <div style="margin-left: auto;">
+        <label>View</label><br>
+        <div class="view-toggle" id="viewToggle">
+            <button type="button" class="vt-btn" data-mode="paginate">Pages</button>
+            <button type="button" class="vt-btn" data-mode="scroll">Scroll</button>
+        </div>
+    </div>
 </form>
 
 <p style="color: var(--text-dim); margin-bottom: 1rem;">
@@ -66,7 +74,7 @@
 </p>
 
 {% if results %}
-<div class="media-grid">
+<div class="media-grid" id="mediaGrid">
     {% for item in results %}
     <div class="media-card">
         <a href="/detail/{{ item.id }}">
@@ -98,6 +106,12 @@
     {% endfor %}
 </div>
 
+<!-- Sentinel for infinite scroll -->
+<div id="scrollSentinel" style="display:none; height:1px;"></div>
+<div id="scrollLoading" style="display:none; text-align:center; padding:2rem; color:var(--text-dim);">Loading more...</div>
+
+<!-- Pagination (shown in paginate mode) -->
+<div id="paginationBlock">
 {% if total_pages > 1 %}
 <div class="pagination">
     {% if page > 1 %}
@@ -119,6 +133,16 @@
     {% endif %}
 </div>
 {% endif %}
+</div>
+
+<!-- Seek bar (shown in scroll mode) -->
+<div id="seekBar" class="seek-bar" style="display:none;">
+    <span id="seekLabel">0 / {{ total }}</span>
+    <div class="seek-track" id="seekTrack">
+        <div class="seek-fill" id="seekFill"></div>
+        <div class="seek-thumb" id="seekThumb"></div>
+    </div>
+</div>
 
 {% else %}
 <div class="empty-state">
@@ -129,23 +153,286 @@
 {% endif %}
 
 <style>
+.filters {
+    position: sticky;
+    z-index: 99;
+}
 .card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
 .card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
 .card-btn:hover { color: var(--text); border-color: #888; }
+
+.view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.vt-btn { background: var(--bg); color: var(--text-dim); border: none; padding: 0.35rem 0.8rem; font-size: 0.8rem; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.vt-btn.active { background: var(--accent); color: white; }
+.vt-btn:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
+.seek-bar {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 0.6rem 2rem; display: flex; align-items: center; gap: 1rem;
+    z-index: 200; user-select: none;
+}
+.seek-bar span { font-size: 0.8rem; color: var(--text-dim); white-space: nowrap; min-width: 100px; }
+.seek-track {
+    flex: 1; height: 8px; background: var(--bg); border-radius: 4px;
+    position: relative; cursor: pointer;
+}
+.seek-fill {
+    height: 100%; background: var(--accent); border-radius: 4px;
+    width: 0%; transition: width 0.15s;
+}
+.seek-thumb {
+    position: absolute; top: 50%; width: 18px; height: 18px;
+    background: var(--accent); border: 2px solid white; border-radius: 50%;
+    transform: translate(-50%, -50%); cursor: grab; left: 0%;
+}
+.seek-thumb:active { cursor: grabbing; transform: translate(-50%, -50%) scale(1.2); }
 </style>
+
 <script>
+const TMDB_IMG = '{{ tmdb_img }}';
+const TOTAL_ITEMS = {{ total }};
+const TOTAL_PAGES = {{ total_pages }};
+const PER_PAGE = 48;
+
+// Build query string from current filters (without page)
+const qp = new URLSearchParams(window.location.search);
+qp.delete('page');
+const filterQS = qp.toString();
+
+// State
+let viewMode = localStorage.getItem('mc_view_mode') || 'paginate';
+let scrollPage = {{ page }};
+let scrollLoading = false;
+let scrollDone = scrollPage >= TOTAL_PAGES;
+let loadedCount = document.querySelectorAll('#mediaGrid .media-card').length;
+
+// DOM refs
+const grid = document.getElementById('mediaGrid');
+const sentinel = document.getElementById('scrollSentinel');
+const loadingEl = document.getElementById('scrollLoading');
+const pagBlock = document.getElementById('paginationBlock');
+const seekBar = document.getElementById('seekBar');
+const seekLabel = document.getElementById('seekLabel');
+const seekFill = document.getElementById('seekFill');
+const seekThumb = document.getElementById('seekThumb');
+const seekTrack = document.getElementById('seekTrack');
+
+// ── Card renderer ──
+function renderCard(item) {
+    const poster = item.poster_path
+        ? (item.poster_path.startsWith('http') ? item.poster_path : TMDB_IMG + '/w342' + item.poster_path)
+        : null;
+    const season = item.season
+        ? ' <span style="color:var(--text-dim);font-weight:400;font-size:0.85em;">S' +
+          String(item.season).padStart(2,'0') +
+          (item.episode ? 'E' + String(item.episode).padStart(2,'0') : '') + '</span>'
+        : '';
+    const rating = item.vote_average
+        ? '<span class="rating">★ ' + parseFloat(item.vote_average).toFixed(1) + '</span>'
+        : '';
+    const res = item.resolution
+        ? '<span class="tag tag-resolution" style="margin-top:0.3rem;">' + item.resolution + '</span>'
+        : '';
+
+    const div = document.createElement('div');
+    div.className = 'media-card';
+    div.innerHTML =
+        '<a href="/detail/' + item.id + '">' +
+            (poster
+                ? '<img class="poster" src="' + poster + '" alt="' + (item.title||'').replace(/"/g,'&quot;') + '" loading="lazy">'
+                : '<div class="no-poster">🎬</div>') +
+            '<div class="info"><h3>' + (item.title||'') + season + '</h3>' +
+            '<div class="meta"><span>' + (item.year || '?') + '</span>' +
+            '<span class="badge badge-' + item.media_type + '">' + item.media_type + '</span>' +
+            rating + '</div>' + res + '</div></a>' +
+        '<div class="card-actions">' +
+            '<button class="card-btn" data-id="' + item.id + '" onclick="openVlc(event,this)">▶ VLC</button>' +
+            '<button class="card-btn" data-id="' + item.id + '" onclick="revealInFinder(event,this)">📂 Reveal</button>' +
+            '<button class="card-btn" data-url="' + location.origin + '/detail/' + item.id + '" onclick="copyLink(event,this)">🔗 Link</button>' +
+        '</div>';
+    return div;
+}
+
+// ── Fetch a page of results ──
+async function fetchPage(page) {
+    const url = '/api/browse?' + filterQS + '&page=' + page;
+    const resp = await fetch(url);
+    return resp.json();
+}
+
+// ── Update seek bar position ──
+function updateSeek() {
+    if (!seekBar) return;
+    const pct = TOTAL_ITEMS > 0 ? Math.min(100, (loadedCount / TOTAL_ITEMS) * 100) : 0;
+    seekFill.style.width = pct + '%';
+    seekThumb.style.left = pct + '%';
+    seekLabel.textContent = loadedCount + ' / ' + TOTAL_ITEMS;
+}
+
+// ── Infinite scroll: load next page ──
+async function loadNextPage() {
+    if (scrollLoading || scrollDone) return;
+    scrollLoading = true;
+    loadingEl.style.display = 'block';
+
+    scrollPage++;
+    try {
+        const data = await fetchPage(scrollPage);
+        data.results.forEach(item => grid.appendChild(renderCard(item)));
+        loadedCount += data.results.length;
+        if (scrollPage >= data.total_pages || data.results.length === 0) scrollDone = true;
+        updateSeek();
+    } catch (e) {
+        console.error('Failed to load page', e);
+        scrollPage--;
+    }
+    scrollLoading = false;
+    loadingEl.style.display = 'none';
+}
+
+// ── Seek to a position (drag / click) ──
+async function seekTo(fraction) {
+    const targetPage = Math.max(1, Math.min(TOTAL_PAGES, Math.ceil(fraction * TOTAL_PAGES)));
+    // Clear grid and reload from page 1 up to targetPage
+    // For efficiency, just load the target page and a window around it
+    grid.innerHTML = '';
+    loadedCount = 0;
+    scrollDone = false;
+    scrollLoading = true;
+    loadingEl.style.display = 'block';
+
+    // Load pages from max(1, targetPage-1) to targetPage to give some context
+    const startPage = Math.max(1, targetPage);
+    for (let p = 1; p <= startPage; p++) {
+        try {
+            const data = await fetchPage(p);
+            data.results.forEach(item => grid.appendChild(renderCard(item)));
+            loadedCount += data.results.length;
+            if (p >= data.total_pages) { scrollDone = true; break; }
+        } catch(e) { break; }
+    }
+    scrollPage = startPage;
+    scrollLoading = false;
+    loadingEl.style.display = 'none';
+    updateSeek();
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
+}
+
+// ── Seek bar drag handling ──
+let dragging = false;
+function seekFromEvent(e) {
+    const rect = seekTrack.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seekFill.style.width = (frac * 100) + '%';
+    seekThumb.style.left = (frac * 100) + '%';
+    const approx = Math.round(frac * TOTAL_ITEMS);
+    seekLabel.textContent = '~' + approx + ' / ' + TOTAL_ITEMS;
+    return frac;
+}
+
+if (seekThumb && seekTrack) {
+    seekThumb.addEventListener('mousedown', e => { dragging = true; e.preventDefault(); });
+    seekTrack.addEventListener('mousedown', e => {
+        dragging = true;
+        seekFromEvent(e);
+    });
+    document.addEventListener('mousemove', e => { if (dragging) seekFromEvent(e); });
+    document.addEventListener('mouseup', e => {
+        if (dragging) {
+            dragging = false;
+            const frac = seekFromEvent(e);
+            seekTo(frac);
+        }
+    });
+}
+
+// ── IntersectionObserver for infinite scroll ──
+const observer = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting && viewMode === 'scroll') loadNextPage();
+}, { rootMargin: '600px' });
+
+// ── View mode switching ──
+function setViewMode(mode) {
+    viewMode = mode;
+    localStorage.setItem('mc_view_mode', mode);
+
+    document.querySelectorAll('.vt-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === mode);
+    });
+
+    if (mode === 'scroll') {
+        pagBlock.style.display = 'none';
+        sentinel.style.display = 'block';
+        seekBar.style.display = 'flex';
+        observer.observe(sentinel);
+        updateSeek();
+        // Add bottom padding so seek bar doesn't cover content
+        document.querySelector('.container').style.paddingBottom = '4rem';
+    } else {
+        pagBlock.style.display = '';
+        sentinel.style.display = 'none';
+        seekBar.style.display = 'none';
+        loadingEl.style.display = 'none';
+        observer.disconnect();
+        document.querySelector('.container').style.paddingBottom = '';
+    }
+}
+
+document.querySelectorAll('.vt-btn').forEach(btn => {
+    btn.addEventListener('click', () => setViewMode(btn.dataset.mode));
+});
+
+// ── Pin nav + filters at top ──
+(function() {
+    const nav = document.querySelector('nav');
+    const filters = document.querySelector('.filters');
+    if (nav && filters) {
+        const setTop = () => { filters.style.top = nav.offsetHeight + 'px'; };
+        setTop();
+        window.addEventListener('resize', setTop);
+    }
+})();
+
+// Initialise
+setViewMode(viewMode);
+
+// ── Card action handlers ──
 function openVlc(e, btn) {
     e.preventDefault();
-    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(() => {
-        btn.textContent = '▶ Playing';
-        setTimeout(() => btn.textContent = '▶ VLC', 2000);
+    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(r => r.json()).then(data => {
+        if (data.error === 'no_open_cmd' && data.file_path) {
+            navigator.clipboard.writeText(data.file_path).then(() => {
+                btn.textContent = 'Path copied';
+            });
+        } else if (data.error) {
+            btn.textContent = data.error; btn.style.color = '#f66';
+        } else {
+            btn.textContent = '▶ Playing';
+        }
+        setTimeout(() => { btn.textContent = '▶ VLC'; btn.style.color = ''; }, 3000);
+    }).catch(() => {
+        btn.textContent = 'Failed'; btn.style.color = '#f66';
+        setTimeout(() => { btn.textContent = '▶ VLC'; btn.style.color = ''; }, 3000);
     });
 }
 function revealInFinder(e, btn) {
     e.preventDefault();
-    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(() => {
-        btn.textContent = '✓ Opened';
-        setTimeout(() => btn.textContent = '📂 Reveal', 2000);
+    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(r => r.json()).then(data => {
+        if (data.error === 'no_open_cmd' && data.file_path) {
+            var dir = data.file_path.substring(0, data.file_path.lastIndexOf('/'));
+            navigator.clipboard.writeText(dir).then(() => {
+                btn.textContent = 'Dir copied';
+            });
+        } else if (data.error) {
+            btn.textContent = data.error; btn.style.color = '#f66';
+        } else {
+            btn.textContent = '✓ Opened';
+        }
+        setTimeout(() => { btn.textContent = '📂 Reveal'; btn.style.color = ''; }, 3000);
+    }).catch(() => {
+        btn.textContent = 'Failed'; btn.style.color = '#f66';
+        setTimeout(() => { btn.textContent = '📂 Reveal'; btn.style.color = ''; }, 3000);
     });
 }
 function copyLink(e, btn) {

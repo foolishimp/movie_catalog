@@ -46,6 +46,28 @@ def find_video_files(directories: list[str], extensions: set[str]) -> list[Path]
     return files
 
 
+def _title_from_directory(filepath: Path) -> tuple:
+    """Walk up directory tree to find a title when filename parsing fails.
+
+    Skips 'Season N' style folders and returns the first ancestor whose
+    guessit parse yields a plausible title.
+    """
+    import re as _re
+    season_re = _re.compile(r'^(season|series|s)\s*\d+$', _re.IGNORECASE)
+
+    for ancestor in filepath.parents:
+        name = ancestor.name
+        if not name:
+            break
+        if season_re.match(name):
+            continue
+        dir_info = guessit(name)
+        dir_title = dir_info.get("title", "").strip()
+        if dir_title and len(dir_title) >= 2 and not _re.match(r'^\d+$', dir_title):
+            return dir_title, dir_info.get("year")
+    return None, None
+
+
 def parse_filename(filepath: Path) -> dict:
     """Use guessit to extract structured info from a filename."""
     info = guessit(filepath.name)
@@ -67,16 +89,27 @@ def parse_filename(filepath: Path) -> dict:
     title = info.get("title", filepath.stem)
     year = info.get("year")
 
-    # If title is just digits or very short, the filename likely starts with an episode
-    # number (e.g. "003 S01E02 Soul Hunter.mkv"). Use the parent directory name instead.
+    # Detect weak titles that need directory fallback:
+    #  - all digits (episode number as filename)
+    #  - very short (≤2 chars)
+    #  - same as release group (e.g. ETRG.mp4)
+    #  - starts with S##E## (episode code baked into title)
     import re as _re
-    if _re.match(r'^\d+$', str(title).strip()):
-        dir_info = guessit(filepath.parent.name)
-        dir_title = dir_info.get("title", "").strip()
-        if dir_title and not _re.match(r'^\d+$', dir_title):
+    t = str(title).strip()
+    needs_fallback = (
+        not t
+        or len(t) <= 2
+        or _re.match(r'^\d+$', t)
+        or t.lower() == str(info.get("release_group", "")).lower()
+        or _re.match(r'^S\d+E\d+', t, _re.IGNORECASE)
+    )
+
+    if needs_fallback:
+        dir_title, dir_year = _title_from_directory(filepath)
+        if dir_title:
             title = dir_title
             if not year:
-                year = dir_info.get("year")
+                year = dir_year
 
     # Strip leading disc/file-number prefix like "1 The Larry Sanders Show" → "The Larry Sanders Show"
     # Only strip when followed by an article (The/A/An) to avoid breaking titles like "30 Rock"
