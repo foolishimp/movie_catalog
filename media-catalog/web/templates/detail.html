@@ -134,15 +134,34 @@
 </style>
 <script>
 document.getElementById('vlc-btn').addEventListener('click', function() {
-    fetch('/api/open/' + this.dataset.id, {method: 'POST'}).then(() => {
-        this.textContent = '▶ Playing';
-        setTimeout(() => this.textContent = '▶ VLC', 2000);
+    var btn = this;
+    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(r => r.json()).then(data => {
+        if (data.error === 'no_open_cmd' && data.file_path) {
+            navigator.clipboard.writeText(data.file_path).then(function() {
+                btn.textContent = 'Path copied';
+            });
+        } else if (data.error) {
+            btn.textContent = data.error; btn.style.color = '#f66';
+        } else {
+            btn.textContent = '▶ Playing';
+        }
+        setTimeout(function() { btn.textContent = '▶ VLC'; btn.style.color = ''; }, 3000);
     });
 });
 document.getElementById('copy-dir-btn').addEventListener('click', function() {
-    fetch('/api/reveal/' + this.dataset.id, {method: 'POST'}).then(() => {
-        this.textContent = '✓ Opened';
-        setTimeout(() => this.textContent = '📂 Reveal', 2000);
+    var btn = this;
+    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(r => r.json()).then(data => {
+        if (data.error === 'no_open_cmd' && data.file_path) {
+            var dir = data.file_path.substring(0, data.file_path.lastIndexOf('/'));
+            navigator.clipboard.writeText(dir).then(function() {
+                btn.textContent = 'Dir copied';
+            });
+        } else if (data.error) {
+            btn.textContent = data.error; btn.style.color = '#f66';
+        } else {
+            btn.textContent = '✓ Opened';
+        }
+        setTimeout(function() { btn.textContent = '📂 Reveal'; btn.style.color = ''; }, 3000);
     });
 });
 document.getElementById('copy-link-btn').addEventListener('click', function() {

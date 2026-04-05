@@ -10,6 +10,7 @@ Or via docker-compose:
 import os
 import sys
 import math
+import json
 
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
@@ -24,6 +25,67 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
 PER_PAGE = 48
+HOST_OPENER_URL = os.getenv("HOST_OPENER_URL", "").rstrip("/")
+
+
+def _parse_network_mounts():
+    """Parse NETWORK_MOUNTS env var into {volume_path: mount_url} dict."""
+    raw = os.getenv("NETWORK_MOUNTS", "")
+    mounts = {}
+    for pair in raw.split(":"):
+        if "=" in pair:
+            vol, url = pair.split("=", 1)
+            # Rejoin if the URL had colons (smb://..., afp://...)
+            mounts[vol] = url
+    # Re-parse properly: split on volume paths
+    mounts = {}
+    for entry in raw.split(":/Volumes/"):
+        if "=" not in entry:
+            continue
+        if not entry.startswith("/"):
+            entry = "/Volumes/" + entry
+        vol, url = entry.split("=", 1)
+        mounts[vol] = url
+    return mounts
+
+
+def _host_open(endpoint: str, file_path: str) -> dict | None:
+    """Delegate an open command to the host opener service. Returns response dict or None."""
+    if not HOST_OPENER_URL:
+        return None
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"{HOST_OPENER_URL}/{endpoint}",
+            data=json.dumps({"file_path": file_path}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def ensure_mounted(file_path: str) -> bool:
+    """If file_path doesn't exist, try to mount its network volume. Returns True if accessible."""
+    if os.path.exists(file_path):
+        return True
+    import subprocess
+    mounts = _parse_network_mounts()
+    for vol_path, mount_url in mounts.items():
+        if file_path.startswith(vol_path) and not os.path.ismount(vol_path):
+            try:
+                subprocess.run(["open", mount_url], check=True, timeout=15)
+                # Wait briefly for the mount to appear
+                import time
+                for _ in range(10):
+                    if os.path.exists(file_path):
+                        return True
+                    time.sleep(1)
+            except Exception:
+                pass
+    return os.path.exists(file_path)
 
 
 def _build_where(params) -> tuple[str, list]:
@@ -79,8 +141,11 @@ def _build_where(params) -> tuple[str, list]:
 
     director = params.get("director", "").strip()
     if director:
-        clauses.append("director ILIKE %s")
-        values.append(f"%{director}%")
+        # Split on comma to match each name independently (handles "Joel Coen, Ethan Coen" vs "Ethan Coen, Joel Coen")
+        parts = [p.strip() for p in director.split(",") if p.strip()]
+        director_clauses = ["director ILIKE %s" for _ in parts]
+        clauses.append("(" + " AND ".join(director_clauses) + ")")
+        values.extend(f"%{p}%" for p in parts)
 
     actor = params.get("actor", "").strip()
     if actor:
@@ -124,8 +189,7 @@ async def homepage(request):
         FROM media ORDER BY created_at DESC LIMIT 12
     """)
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "stats": s,
         "genres": genres,
         "years": years,
@@ -148,7 +212,7 @@ async def browse(request):
         "recent": "created_at DESC",
         "popularity": "popularity DESC NULLS LAST",
     }
-    sort = sort_options.get(params.get("sort", ""), "title ASC")
+    sort = sort_options.get(params.get("sort", "recent"), "created_at DESC")
 
     count_sql = f"SELECT count(*) AS total FROM media WHERE {where}"
     total = query(count_sql, values)[0]["total"]
@@ -171,8 +235,7 @@ async def browse(request):
         WHERE genres IS NOT NULL ORDER BY genre
     """)
 
-    return templates.TemplateResponse("browse.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "browse.html", {
         "results": results,
         "total": total,
         "page": page,
@@ -199,8 +262,7 @@ async def detail(request):
             (entry["duplicate_group"], entry_id)
         )
 
-    return templates.TemplateResponse("detail.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "detail.html", {
         "entry": entry,
         "dupes": dupes,
         "tmdb_img": TMDB_IMG_BASE,
@@ -228,11 +290,54 @@ async def duplicates(request):
     """)
     waste = total_waste[0]["wasted"] if total_waste and total_waste[0]["wasted"] else "0 bytes"
 
-    return templates.TemplateResponse("duplicates.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "duplicates.html", {
         "dupes": dupes,
         "waste": waste,
         "tmdb_img": TMDB_IMG_BASE,
+    })
+
+
+async def api_browse(request):
+    """JSON API for browse – supports infinite scroll."""
+    params = dict(request.query_params)
+    where, values = _build_where(params)
+    page = max(1, int(params.get("page", 1)))
+    offset = (page - 1) * PER_PAGE
+
+    sort_options = {
+        "title": "title ASC",
+        "year": "year DESC NULLS LAST",
+        "rating": "vote_average DESC NULLS LAST",
+        "size": "file_size_bytes DESC",
+        "recent": "created_at DESC",
+        "popularity": "popularity DESC NULLS LAST",
+    }
+    sort = sort_options.get(params.get("sort", "recent"), "created_at DESC")
+
+    count_sql = f"SELECT count(*) AS total FROM media WHERE {where}"
+    total = query(count_sql, values)[0]["total"]
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+
+    sql = f"""
+        SELECT id, title, year, media_type, poster_path, vote_average,
+               genres, resolution, file_size_bytes, director, runtime_minutes, directory,
+               season, episode
+        FROM media
+        WHERE {where}
+        ORDER BY {sort}
+        LIMIT {PER_PAGE} OFFSET {offset}
+    """
+    results = query(sql, values)
+
+    # Ensure JSON-safe types (datetimes, Decimals, etc.)
+    safe = json.loads(json.dumps(results, default=str))
+
+    return JSONResponse({
+        "results": safe,
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "per_page": PER_PAGE,
     })
 
 
@@ -286,8 +391,7 @@ async def series(request):
                    max(vote_average) AS vote_average, max(overview) AS overview
             FROM media WHERE media_type = 'series' AND lower(trim(parsed_title)) = lower(%s)
         """, (show,))
-        return templates.TemplateResponse("series_episodes.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "series_episodes.html", {
             "episodes": episodes,
             "show": show,
             "season": sn,
@@ -310,8 +414,7 @@ async def series(request):
                    max(vote_average) AS vote_average, max(overview) AS overview
             FROM media WHERE media_type = 'series' AND lower(trim(parsed_title)) = lower(%s)
         """, (show,))
-        return templates.TemplateResponse("series_seasons.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "series_seasons.html", {
             "seasons": seasons,
             "show": show,
             "show_info": show_info[0] if show_info else {},
@@ -351,8 +454,7 @@ async def series(request):
     """
     results = query(sql, values or None)
 
-    return templates.TemplateResponse("series.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "series.html", {
         "results": results,
         "total": total,
         "page": page,
@@ -363,33 +465,57 @@ async def series(request):
 
 
 async def api_open_vlc(request):
-    """Open a media file in VLC (local server only)."""
+    """Open a media file in VLC. Delegates to host opener when running in Docker."""
+    import shutil
     import subprocess
     entry_id = request.path_params["id"]
     rows = query("SELECT file_path FROM media WHERE id = %s", (entry_id,))
     if not rows:
         return JSONResponse({"error": "not found"}, status_code=404)
     file_path = rows[0]["file_path"]
+    if not shutil.which("open"):
+        result = _host_open("open-vlc", file_path)
+        if result and result.get("ok"):
+            return JSONResponse({"ok": True, "file_path": file_path})
+        return JSONResponse({"error": (result or {}).get("error", "no_open_cmd"), "file_path": file_path}, status_code=501)
+    ensure_mounted(file_path)
     try:
-        subprocess.Popen(["open", "-n", "-a", "VLC", file_path])
-        return JSONResponse({"ok": True})
+        result = subprocess.run(
+            ["open", "-n", "-a", "VLC", file_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return JSONResponse({"error": result.stderr.strip() or "Failed to open VLC", "file_path": file_path}, status_code=500)
+        return JSONResponse({"ok": True, "file_path": file_path})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e), "file_path": file_path}, status_code=500)
 
 
 async def api_reveal(request):
-    """Reveal a media file in Finder, with the file selected (macOS only)."""
+    """Reveal a media file in Finder. Delegates to host opener when running in Docker."""
+    import shutil
     import subprocess
     entry_id = request.path_params["id"]
     rows = query("SELECT file_path FROM media WHERE id = %s", (entry_id,))
     if not rows:
         return JSONResponse({"error": "not found"}, status_code=404)
     file_path = rows[0]["file_path"]
+    if not shutil.which("open"):
+        result = _host_open("reveal", file_path)
+        if result and result.get("ok"):
+            return JSONResponse({"ok": True, "file_path": file_path})
+        return JSONResponse({"error": (result or {}).get("error", "no_open_cmd"), "file_path": file_path}, status_code=501)
+    ensure_mounted(file_path)
     try:
-        subprocess.Popen(["open", "-R", file_path])
-        return JSONResponse({"ok": True})
+        result = subprocess.run(
+            ["open", "-R", file_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            return JSONResponse({"error": result.stderr.strip() or "File not found", "file_path": file_path}, status_code=500)
+        return JSONResponse({"ok": True, "file_path": file_path})
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e), "file_path": file_path}, status_code=500)
 
 
 async def api_tags(request):
@@ -422,6 +548,7 @@ app = Starlette(
         Route("/detail/{id:int}", detail),
         Route("/series", series),
         Route("/duplicates", duplicates),
+        Route("/api/browse", api_browse),
         Route("/api/search", api_search),
         Route("/api/stats", api_stats),
         Route("/api/open/{id:int}", api_open_vlc, methods=["POST"]),
