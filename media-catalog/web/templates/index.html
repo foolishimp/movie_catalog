@@ -2,6 +2,22 @@
 {% block title %}Media Catalog — Dashboard{% endblock %}
 {% block content %}
 
+<div class="refresh-bar">
+    <div class="refresh-bar-left">
+        <strong>Catalog</strong>
+        <span class="refresh-sub" id="refresh-sub">scan your drives and fetch missing metadata from OMDb</span>
+    </div>
+    <div class="refresh-bar-right">
+        <div class="refresh-progress" id="refresh-progress" hidden>
+            <div class="refresh-progress-bar"><div id="refresh-progress-fill"></div></div>
+            <div class="refresh-progress-text" id="refresh-progress-text">starting…</div>
+        </div>
+        <button id="refresh-cancel-btn" class="refresh-btn refresh-btn-alt" onclick="cancelRefresh()" hidden>✕ Cancel</button>
+        <button id="refresh-force-btn"  class="refresh-btn refresh-btn-alt" onclick="startRefresh(true)" hidden title="Kill the running pipeline and start a fresh one">⚠ Force restart</button>
+        <button id="refresh-btn"        class="refresh-btn" onclick="startRefresh(false)">↻ Refresh</button>
+    </div>
+</div>
+
 <div class="stats-grid">
     <div class="stat-card">
         <div class="number">{{ stats.get('total_entries', 0) | default(0) }}</div>
@@ -52,30 +68,42 @@
 <div class="media-grid">
     {% for item in recent %}
     <div class="media-card">
-        <a href="/detail/{{ item.id }}">
+        <a href="{% if item.is_series_card %}/series?show={{ item.norm_title | urlencode }}{% else %}/detail/{{ item.id }}{% endif %}">
             {% if item.poster_path %}
             <img class="poster" src="{{ item.poster_path if item.poster_path.startswith('http') else tmdb_img + '/w342' + item.poster_path }}" alt="{{ item.title }}" loading="lazy">
             {% else %}
-            <div class="no-poster">🎬</div>
+            <div class="no-poster">{{ '📺' if item.is_series_card else '🎬' }}</div>
             {% endif %}
             <div class="info">
-                <h3>{{ item.title }}{% if item.season %} <span style="color: var(--text-dim); font-weight: 400; font-size: 0.85em;">S{{ '%02d'|format(item.season) }}{% if item.episode %}E{{ '%02d'|format(item.episode) }}{% endif %}</span>{% endif %}</h3>
+                <h3>{{ item.title }}</h3>
                 <div class="meta">
                     <span>{{ item.year or '?' }}</span>
                     <span class="badge badge-{{ item.media_type }}">{{ item.media_type }}</span>
+                    {% if item.is_series_card %}
+                    {% if item.season_count > 1 %}<span style="color: var(--text-dim);">{{ item.season_count }} seasons</span>{% endif %}
+                    <span style="color: var(--text-dim);">{{ item.episode_count }} ep</span>
+                    {% endif %}
                     {% if item.vote_average %}
                     <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
                     {% endif %}
                 </div>
-                {% if item.resolution %}
+                {% if not item.is_series_card and item.resolution %}
                 <span class="tag tag-resolution" style="margin-top: 0.3rem;">{{ item.resolution }}</span>
                 {% endif %}
             </div>
         </a>
         <div class="card-actions">
-            <button class="card-btn" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
-            <button class="card-btn" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            {% if item.is_series_card %}
+            <button class="card-btn" data-dir="{{ item.directory }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path for this machine (right-click for formats)">📋 Folder</button>
+            {% else %}
+            <button class="mc-star{{ ' starred' if item.starred }}" data-id="{{ item.id }}" onclick="mcToggleStar(event,this)" title="{{ 'Unstar — remove from Favourites' if item.starred else 'Star — add to Favourites' }}">{{ '★' if item.starred else '☆' }}</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="mcTagMenu(event,this)" title="Tags — tick the tags this entry is in">🏷</button>
+            <button class="card-btn server-only" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
+            <button class="card-btn local-vlc-only" data-id="{{ item.id }}" onclick="mcOpenLocalVlc(event,this)" title="Open the SMB network URI in VLC on this computer">▶ VLC here</button>
+            <button class="card-btn server-only" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="mcCopyPath(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy file path for this machine (right-click for formats)">⧉ Path</button>
             <button class="card-btn" data-url="{{ request.url.scheme }}://{{ request.url.netloc }}/detail/{{ item.id }}" onclick="copyLink(event,this)">🔗 Link</button>
+            {% endif %}
         </div>
     </div>
     {% endfor %}
@@ -97,6 +125,26 @@
 .card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
 .card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
 .card-btn:hover { color: var(--text); border-color: #888; }
+
+.refresh-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    background: var(--surface); border: 1px solid #333; border-radius: 8px;
+    padding: 0.75rem 1rem; margin-bottom: 1.25rem; }
+.refresh-bar-left { display: flex; flex-direction: column; gap: 0.15rem; }
+.refresh-sub { color: var(--text-dim); font-size: 0.8rem; }
+.refresh-bar-right { display: flex; align-items: center; gap: 0.75rem; }
+.refresh-btn { background: var(--green, #2a7); color: #fff; border: 0;
+    padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.refresh-btn:hover { filter: brightness(1.1); }
+.refresh-btn[disabled] { opacity: 0.55; cursor: not-allowed; filter: none; }
+.refresh-btn-alt { background: #444; }
+.refresh-btn-alt:hover { background: #555; }
+#refresh-force-btn { background: #a55; }
+#refresh-force-btn:hover { background: #c66; }
+.refresh-progress { display: flex; flex-direction: column; gap: 0.25rem; min-width: 220px; }
+.refresh-progress-bar { height: 6px; background: #222; border-radius: 3px; overflow: hidden; }
+.refresh-progress-bar > div { height: 100%; width: 0%; background: var(--green, #2a7);
+    transition: width 0.3s ease; }
+.refresh-progress-text { font-size: 0.75rem; color: var(--text-dim); font-family: monospace; }
 </style>
 <script>
 function openVlc(e, btn) {
@@ -115,11 +163,160 @@ function revealInFinder(e, btn) {
 }
 function copyLink(e, btn) {
     e.preventDefault();
-    navigator.clipboard.writeText(btn.dataset.url).then(() => {
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = '🔗 Link', 1500);
-    });
+    MC.copyText(btn.dataset.url, 'link');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = '🔗 Link', 1500);
 }
+
+// -- Refresh (scan → enrich) ------------------------------------------------
+let refreshPollTimer = null;
+let reloadAfterDone = false;
+
+function fmtElapsed(secs) {
+    if (secs == null) return '';
+    secs = Math.max(0, Math.floor(secs));
+    const m = Math.floor(secs / 60), s = secs % 60;
+    return m ? `${m}m${String(s).padStart(2,'0')}s` : `${s}s`;
+}
+
+function renderRefresh(status) {
+    const bar = document.getElementById('refresh-progress');
+    const fill = document.getElementById('refresh-progress-fill');
+    const text = document.getElementById('refresh-progress-text');
+    const btn = document.getElementById('refresh-btn');
+    const forceBtn = document.getElementById('refresh-force-btn');
+    const cancelBtn = document.getElementById('refresh-cancel-btn');
+    const sub = document.getElementById('refresh-sub');
+
+    if (status.running) {
+        bar.hidden = false;
+        btn.disabled = true;
+        btn.textContent = '↻ Running…';
+        cancelBtn.hidden = false;
+        let pct = 0, label = 'starting…';
+        const elapsed = status.started_at ? (Date.now()/1000 - status.started_at) : 0;
+        if (status.phase === 'scanning') {
+            label = `scanning drives · ${fmtElapsed(elapsed)}`;
+            pct = 5;
+            if (status.scan_found != null) label = `scan: ${status.scan_found.toLocaleString()} files found · ${fmtElapsed(elapsed)}`;
+            if (status.scan_new != null) label = `scan: ${status.scan_new.toLocaleString()} new · ${fmtElapsed(elapsed)}`;
+        } else if (status.phase === 'enriching') {
+            const done = status.enrich_done || 0, total = status.enrich_total || status.enrich_unique || 0;
+            pct = total ? Math.min(99, 10 + 90 * done / total) : 15;
+            label = total
+                ? `enriching ${done.toLocaleString()}/${total.toLocaleString()} · ${fmtElapsed(elapsed)}`
+                : `enriching · ${fmtElapsed(elapsed)}`;
+        }
+        fill.style.width = pct.toFixed(1) + '%';
+        text.textContent = label;
+
+        // Stale detection surfaced in sub-line + force button.
+        if (status.stale) {
+            sub.textContent = `⚠ no progress for ${fmtElapsed(status.heartbeat_age_sec)} — pipeline may be stuck`;
+            forceBtn.hidden = false;
+        } else {
+            sub.textContent = `pipeline running · last update ${fmtElapsed(status.heartbeat_age_sec)} ago`;
+            forceBtn.hidden = true;
+        }
+    } else {
+        btn.disabled = false;
+        btn.textContent = '↻ Refresh';
+        cancelBtn.hidden = true;
+        forceBtn.hidden = true;
+        if (status.phase === 'done' || status.phase === 'error') {
+            const ok = status.exit_code === 0;
+            bar.hidden = false;
+            fill.style.width = '100%';
+            fill.style.background = ok ? '' : '#e55';
+            let msg = ok ? 'done' : `failed (exit ${status.exit_code})`;
+            if (status.scan_new != null) msg += ` · ${status.scan_new.toLocaleString()} new`;
+            text.textContent = msg;
+            sub.textContent = ok ? 'catalog is up to date' : 'check .refresh.log on host';
+            if (reloadAfterDone && ok) {
+                reloadAfterDone = false;
+                setTimeout(() => window.location.reload(), 1200);
+            }
+        } else {
+            bar.hidden = true;
+            sub.textContent = 'scan your drives and fetch missing metadata from OMDb';
+        }
+    }
+}
+
+async function pollRefresh() {
+    try {
+        const r = await fetch('/api/refresh/status');
+        const s = await r.json();
+        renderRefresh(s);
+        if (s.running) {
+            refreshPollTimer = setTimeout(pollRefresh, 2000);
+        } else {
+            refreshPollTimer = null;
+        }
+    } catch (e) {
+        refreshPollTimer = null;
+        document.getElementById('refresh-sub').textContent = 'refresh status unavailable';
+    }
+}
+
+async function startRefresh(force) {
+    const btn = document.getElementById('refresh-btn');
+    const forceBtn = document.getElementById('refresh-force-btn');
+    btn.disabled = true; btn.textContent = force ? '⚠ Force restarting…' : '↻ Starting…';
+    forceBtn.hidden = true;
+    try {
+        const r = await fetch('/api/refresh', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({force: !!force}),
+        });
+        const body = await r.json();
+        if (r.status === 409) {
+            // Already running with a fresh heartbeat. Surface the state and
+            // let the user decide whether to force-restart.
+            reloadAfterDone = true;
+            document.getElementById('refresh-sub').textContent =
+                `already running (started ${fmtElapsed(Date.now()/1000 - body.started_at)} ago)`;
+            pollRefresh();
+            return;
+        }
+        if (!r.ok) {
+            btn.disabled = false; btn.textContent = '↻ Refresh';
+            document.getElementById('refresh-sub').textContent = body.error || 'failed to start';
+            return;
+        }
+        reloadAfterDone = true;
+        pollRefresh();
+    } catch (e) {
+        btn.disabled = false; btn.textContent = '↻ Refresh';
+        document.getElementById('refresh-sub').textContent = 'could not start refresh';
+    }
+}
+
+async function cancelRefresh() {
+    const cancelBtn = document.getElementById('refresh-cancel-btn');
+    cancelBtn.disabled = true; cancelBtn.textContent = '✕ Cancelling…';
+    try {
+        await fetch('/api/refresh/cancel', {method: 'POST'});
+    } catch (_) {}
+    setTimeout(() => {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = '✕ Cancel';
+        pollRefresh();
+    }, 400);
+}
+
+// On page load, pick up any refresh already in progress.
+(async function() {
+    try {
+        const r = await fetch('/api/refresh/status');
+        const s = await r.json();
+        if (s.running || s.phase === 'done' || s.phase === 'error') {
+            renderRefresh(s);
+            if (s.running) pollRefresh();
+        }
+    } catch (_) {}
+})();
 </script>
 
 {% endblock %}

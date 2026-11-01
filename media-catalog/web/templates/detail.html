@@ -9,14 +9,20 @@
     <div class="info">
         <h1>{{ entry.title }}{% if entry.year %} <span style="color: var(--text-dim); font-weight: 400;">({{ entry.year }})</span>{% endif %}</h1>
         <div class="card-actions" style="margin: 0.75rem 0; justify-content: flex-start;">
-            <button class="card-btn" id="vlc-btn" data-id="{{ entry.id }}">▶ VLC</button>
-            <button class="card-btn" id="copy-dir-btn" data-id="{{ entry.id }}">📂 Reveal</button>
+            <button class="mc-star{{ ' starred' if entry.starred }}" data-id="{{ entry.id }}" onclick="mcToggleStar(event,this)" title="{{ 'Unstar — remove from Favourites' if entry.starred else 'Star — add to Favourites' }}" style="font-size: 1.3rem;">{{ '★' if entry.starred else '☆' }}</button>
+            <button class="card-btn" data-id="{{ entry.id }}" onclick="mcTagMenu(event,this)" title="Tags — tick the tags this entry is in">🏷 Tags</button>
+            <button class="card-btn server-only" id="vlc-btn" data-id="{{ entry.id }}">▶ VLC</button>
+            <button class="card-btn local-vlc-only" data-id="{{ entry.id }}" onclick="mcOpenLocalVlc(event,this)" title="Open the SMB network URI in VLC on this computer">▶ VLC here</button>
+            <button class="card-btn server-only" id="copy-dir-btn" data-id="{{ entry.id }}">📂 Reveal</button>
+            <button class="card-btn" data-id="{{ entry.id }}" onclick="mcCopyPath(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy file path for this machine (right-click for formats)">⧉ Path</button>
+            <button class="card-btn" data-id="{{ entry.id }}" onclick="mcPathMenu(event,this)" title="Copy path as…">▾</button>
             <button class="card-btn" id="copy-link-btn" data-url="{{ request.url }}">🔗 Link</button>
             {% if entry.imdb_id %}
             <a class="card-btn" href="https://www.imdb.com/title/{{ entry.imdb_id }}/" target="_blank">IMDb ↗</a>
             {% else %}
             <a class="card-btn" href="https://www.imdb.com/find/?q={{ entry.title | urlencode }}{% if entry.year %}+{{ entry.year }}{% endif %}&s=tt" target="_blank">IMDb ↗</a>
             {% endif %}
+            <button class="card-btn" id="resync-btn" data-id="{{ entry.id }}" title="Re-fetch metadata from OMDb for this entry">↻ Resync meta</button>
         </div>
 
         <span class="badge badge-{{ entry.media_type }}">{{ entry.media_type }}</span>
@@ -165,9 +171,32 @@ document.getElementById('copy-dir-btn').addEventListener('click', function() {
     });
 });
 document.getElementById('copy-link-btn').addEventListener('click', function() {
-    navigator.clipboard.writeText(this.dataset.url).then(() => {
-        this.textContent = 'Copied!';
-        setTimeout(() => this.textContent = '🔗 Link', 1500);
+    var btn = this;
+    MC.copyText(btn.dataset.url, 'link');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = '🔗 Link', 1500);
+});
+
+document.getElementById('resync-btn').addEventListener('click', function() {
+    var btn = this;
+    var original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '↻ Resyncing…';
+    fetch('/api/resync/' + btn.dataset.id, {method: 'POST'}).then(r => r.json().then(data => ({status: r.status, data}))).then(({status, data}) => {
+        if (status === 200 && data.ok) {
+            btn.textContent = '✓ Updated — reloading';
+            setTimeout(() => window.location.reload(), 800);
+        } else {
+            btn.disabled = false;
+            btn.textContent = (data.error || 'failed').slice(0, 40);
+            btn.style.color = '#f66';
+            setTimeout(() => { btn.textContent = original; btn.style.color = ''; }, 4000);
+        }
+    }).catch(e => {
+        btn.disabled = false;
+        btn.textContent = 'host_opener down';
+        btn.style.color = '#f66';
+        setTimeout(() => { btn.textContent = original; btn.style.color = ''; }, 4000);
     });
 });
 </script>

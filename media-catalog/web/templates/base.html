@@ -66,6 +66,21 @@
             font-size: 0.9rem;
         }
 
+        .nav-refresh-btn {
+            background: var(--accent2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+        .nav-refresh-btn:hover:not(:disabled) { background: var(--surface2); }
+        .nav-refresh-btn:disabled { opacity: 0.6; cursor: default; }
+        .nav-refresh-msg { font-size: 0.8rem; color: var(--green); max-width: 260px; }
+        .nav-refresh-msg.error { color: var(--accent); }
+
         .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
 
         .stats-grid {
@@ -287,6 +302,75 @@
         }
         .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
 
+        /* Universal path controls: hide server-only actions (VLC / Reveal)
+           when the browser is not running on the server Mac itself. */
+        html.mc-remote .server-only { display: none !important; }
+        .local-vlc-only { display: none !important; }
+        html.mc-remote.mc-local-vlc .local-vlc-only { display: inline-flex !important; }
+
+        .mc-toast {
+            position: fixed; bottom: 1.5rem; left: 50%;
+            transform: translateX(-50%) translateY(12px);
+            background: var(--surface2); color: var(--text);
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 0.6rem 1.2rem; font-size: 0.82rem;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+            z-index: 500; max-width: 80vw; word-break: break-all;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+        }
+        .mc-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .mc-toast.error { border-color: var(--accent); color: var(--accent); }
+
+        .mc-path-menu {
+            position: absolute; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 0.3rem; z-index: 400;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            min-width: 260px; max-width: min(440px, 90vw);
+        }
+        .mc-path-menu button {
+            display: block; width: 100%; text-align: left;
+            background: none; border: none; color: var(--text);
+            padding: 0.45rem 0.6rem; border-radius: 6px;
+            cursor: pointer; font-size: 0.85rem;
+        }
+        .mc-path-menu button:hover { background: var(--surface2); }
+        .mc-path-menu button small {
+            display: block; color: var(--text-dim);
+            font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.7rem;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .mc-default-tag { color: var(--green); font-size: 0.7rem; margin-left: 0.5rem; }
+
+        /* Favourites: star toggle + tag membership dropdown */
+        .mc-star {
+            background: none; border: 1px solid transparent; cursor: pointer;
+            font-size: 1rem; line-height: 1; color: var(--text-dim);
+            padding: 0.15rem 0.3rem; border-radius: 4px; flex: 0 0 auto;
+        }
+        .mc-star:hover { color: var(--yellow); }
+        .mc-star.starred { color: var(--yellow); }
+        .mc-tag-menu { min-width: 200px; max-height: 320px; overflow-y: auto; }
+        .mc-tag-menu .mc-tag-empty {
+            color: var(--text-dim); font-size: 0.78rem; padding: 0.45rem 0.6rem;
+        }
+        .mc-tag-row .mc-tag-tick {
+            visibility: hidden; color: var(--green); margin-right: 0.45rem; font-weight: 700;
+        }
+        .mc-tag-row.applied .mc-tag-tick { visibility: visible; }
+        .mc-tag-new { border-top: 1px solid var(--border) !important; margin-top: 0.2rem; color: var(--accent) !important; }
+
+        .fav-pills { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
+        .fav-pill {
+            display: inline-block; padding: 0.3rem 0.9rem; border-radius: 16px;
+            font-size: 0.85rem; background: var(--surface); color: var(--text-dim);
+            border: 1px solid var(--border);
+        }
+        .fav-pill:hover { color: var(--text); text-decoration: none; }
+        .fav-pill.active { background: var(--accent); color: white; border-color: var(--accent); }
+
         @media (max-width: 768px) {
             nav { flex-wrap: wrap; gap: 1rem; }
             .search-bar { margin-left: 0; width: 100%; }
@@ -303,16 +387,408 @@
         <a href="/">Dashboard</a>
         <a href="/browse">Browse</a>
         <a href="/series">Series</a>
+        <a href="/favourites">Favourites</a>
         <a href="/duplicates">Duplicates</a>
         <a href="/browse?unenriched=1">Unenriched</a>
+        <a class="local-vlc-only" href="/local-vlc" title="One-time setup for opening the selected network URI in VLC on this computer">Local VLC setup</a>
         <form class="search-bar" action="/browse" method="get">
             <input type="text" name="q" placeholder="Search titles, plots, directors..." value="{{ request.query_params.get('q', '') }}">
             <button type="submit">Search</button>
         </form>
+        <button id="nav-refresh-btn" class="nav-refresh-btn" title="Rescan media folders and refresh metadata from OMDb">⟳ Refresh</button>
+        <span id="nav-refresh-msg" class="nav-refresh-msg"></span>
     </nav>
 
     <div class="container">
         {% block content %}{% endblock %}
     </div>
+
+    <script>
+    // ── Universal open: path mapping + clipboard for any LAN client ────────
+    window.MC = (function () {
+        const KIND_LABEL = { unc: 'Windows path', smb: 'smb:// URL', mac: 'Mac path' };
+
+        // whoami: is this browser running on the server Mac itself?
+        // Cached in sessionStorage so server-only buttons don't flash on nav.
+        let whoami = null;
+        try { whoami = JSON.parse(sessionStorage.getItem('mc_whoami') || 'null'); } catch (e) {}
+        function applyWhoami() {
+            if (whoami) document.documentElement.classList.toggle('mc-remote', !whoami.is_server_host);
+        }
+        applyWhoami();
+        fetch('/api/whoami').then(r => r.json()).then(w => {
+            whoami = w;
+            try { sessionStorage.setItem('mc_whoami', JSON.stringify(w)); } catch (e) {}
+            applyWhoami();
+        }).catch(() => {});
+
+        let mappingsPromise = null;
+        function mappings() {
+            if (!mappingsPromise) {
+                mappingsPromise = fetch('/api/path-mappings')
+                    .then(r => r.json()).then(b => b.mappings || {})
+                    .catch(() => { mappingsPromise = null; return {}; });
+            }
+            return mappingsPromise;
+        }
+
+        function clientOS() {
+            const p = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '') + ' ' + navigator.userAgent;
+            if (/windows|win32|win64/i.test(p)) return 'windows';
+            if (/mac/i.test(p)) return 'mac';
+            return 'other';
+        }
+
+        document.documentElement.classList.toggle(
+            'mc-local-vlc', clientOS() === 'windows' || clientOS() === 'mac'
+        );
+
+        function defaultKind() {
+            const os = clientOS();
+            if (os === 'windows') return 'unc';
+            if (os === 'mac') return (whoami && whoami.is_server_host) ? 'mac' : 'smb';
+            return 'smb';
+        }
+
+        function legacyCopy(text) {
+            // Fallback for http:// LAN pages, where navigator.clipboard is unavailable.
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+            document.body.appendChild(ta);
+            ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+            return ok;
+        }
+
+        function toast(msg, isError) {
+            let t = document.getElementById('mc-toast');
+            if (!t) {
+                t = document.createElement('div');
+                t.id = 'mc-toast';
+                t.className = 'mc-toast';
+                document.body.appendChild(t);
+            }
+            t.textContent = msg;
+            t.classList.toggle('error', !!isError);
+            t.classList.add('show');
+            clearTimeout(t._timer);
+            t._timer = setTimeout(() => t.classList.remove('show'), 2800);
+        }
+
+        function copyText(text, label) {
+            const shown = text.length > 90 ? text.slice(0, 87) + '…' : text;
+            const done = () => toast('✓ Copied ' + (label ? label + ': ' : '') + shown);
+            const fail = () => toast('Copy failed — path: ' + shown, true);
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(done, () => (legacyCopy(text) ? done() : fail()));
+            } else {
+                legacyCopy(text) ? done() : fail();
+            }
+        }
+
+        // Client-side twin of app.py map_path(), for buttons that carry a
+        // raw directory (data-dir) instead of an entry id.
+        function mapLocal(path, maps) {
+            const variants = { mac: path };
+            const prefixes = Object.keys(maps).sort((a, b) => b.length - a.length);
+            for (const raw of prefixes) {
+                const prefix = raw.replace(/\/+$/, '');
+                if (path !== prefix && !path.startsWith(prefix + '/')) continue;
+                const rest = path.slice(prefix.length);
+                const t = maps[raw] || {};
+                if (t.smb) variants.smb = t.smb.replace(/\/+$/, '') + rest.split('/').map(encodeURIComponent).join('/');
+                if (t.unc) variants.unc = t.unc.replace(/\\+$/, '') + rest.split('/').join('\\');
+                break;
+            }
+            return variants;
+        }
+
+        function pickVariant(variants, kind) {
+            const k = kind || defaultKind();
+            if (variants[k]) return { kind: k, text: variants[k] };
+            if (variants.smb) return { kind: 'smb', text: variants.smb };
+            return { kind: 'mac', text: variants.mac };
+        }
+
+        function fetchPaths(id) {
+            return fetch('/api/paths/' + id).then(r => {
+                if (!r.ok) throw new Error('paths ' + r.status);
+                return r.json();
+            });
+        }
+
+        function copyEntryPath(id, kind) {
+            fetchPaths(id).then(p => {
+                const v = pickVariant(p.variants, kind);
+                copyText(v.text, KIND_LABEL[v.kind]);
+            }).catch(() => toast('Could not fetch path for entry ' + id, true));
+        }
+
+        function copyLocalPath(path, kind) {
+            mappings().then(maps => {
+                const v = pickVariant(mapLocal(path, maps), kind);
+                copyText(v.text, KIND_LABEL[v.kind]);
+            });
+        }
+
+        function closeMenu() {
+            const m = document.getElementById('mc-path-menu');
+            if (m) m.remove();
+        }
+
+        function showMenu(anchor, variants) {
+            closeMenu();
+            const menu = document.createElement('div');
+            menu.id = 'mc-path-menu';
+            menu.className = 'mc-path-menu';
+            const def = defaultKind();
+            ['unc', 'smb', 'mac'].forEach(kind => {
+                if (!variants[kind]) return;
+                const item = document.createElement('button');
+                item.type = 'button';
+                const title = document.createElement('span');
+                title.textContent = KIND_LABEL[kind];
+                if (kind === def) {
+                    const tag = document.createElement('span');
+                    tag.className = 'mc-default-tag';
+                    tag.textContent = 'default';
+                    title.appendChild(tag);
+                }
+                const sub = document.createElement('small');
+                sub.textContent = variants[kind];
+                item.appendChild(title);
+                item.appendChild(sub);
+                item.addEventListener('click', ev => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    copyText(variants[kind], KIND_LABEL[kind]);
+                    closeMenu();
+                });
+                menu.appendChild(item);
+            });
+            document.body.appendChild(menu);
+            const r = anchor.getBoundingClientRect();
+            const left = Math.min(r.left + window.scrollX,
+                window.scrollX + document.documentElement.clientWidth - menu.offsetWidth - 8);
+            menu.style.top = (r.bottom + window.scrollY + 4) + 'px';
+            menu.style.left = Math.max(8, left) + 'px';
+            setTimeout(() => {
+                document.addEventListener('click', function h() {
+                    closeMenu();
+                    document.removeEventListener('click', h);
+                });
+            }, 0);
+        }
+
+        function pathMenu(btn) {
+            if (document.getElementById('mc-path-menu')) { closeMenu(); return; }
+            if (btn.dataset.id) {
+                fetchPaths(btn.dataset.id)
+                    .then(p => showMenu(btn, p.variants))
+                    .catch(() => toast('Could not fetch path', true));
+            } else if (btn.dataset.dir) {
+                mappings().then(maps => showMenu(btn, mapLocal(btn.dataset.dir, maps)));
+            }
+        }
+
+        return { clientOS, defaultKind, copyText, copyEntryPath, copyLocalPath, pathMenu, toast, mappings, mapLocal };
+    })();
+
+    // Global handlers for inline onclick / oncontextmenu on entry buttons.
+    function mcCopyPath(e, btn) { e.preventDefault(); e.stopPropagation(); MC.copyEntryPath(btn.dataset.id); }
+    function mcCopyDir(e, btn) { e.preventDefault(); e.stopPropagation(); MC.copyLocalPath(btn.dataset.dir); }
+    function mcPathMenu(e, btn) { e.preventDefault(); e.stopPropagation(); MC.pathMenu(btn); }
+    function mcOpenLocalVlc(e, btn) {
+        e.preventDefault(); e.stopPropagation();
+        const original = btn.textContent;
+        btn.textContent = 'Opening…';
+        window.location.assign('/api/open-local-vlc/' + encodeURIComponent(btn.dataset.id));
+        window.setTimeout(() => { btn.textContent = original; }, 1800);
+    }
+
+    // ── Favourites: star toggle + tag membership dropdown ──────────────────
+    // Starring is independent of tags; applying a tag auto-stars the entry
+    // (the server enforces this and mcApplyTag syncs the star UI back).
+    function mcSetStar(id, starred) {
+        document.querySelectorAll('.mc-star[data-id="' + id + '"]').forEach(function (b) {
+            b.classList.toggle('starred', !!starred);
+            b.textContent = starred ? '★' : '☆';
+            b.title = starred ? 'Unstar — remove from Favourites' : 'Star — add to Favourites';
+        });
+    }
+
+    function mcToggleStar(e, btn) {
+        e.preventDefault(); e.stopPropagation();
+        var id = btn.dataset.id;
+        var was = btn.classList.contains('starred');
+        mcSetStar(id, !was);  // optimistic
+        fetch('/api/media/' + id + '/star', { method: was ? 'DELETE' : 'POST' })
+            .then(function (r) { if (!r.ok) throw new Error('star ' + r.status); return r.json(); })
+            .then(function (s) { mcSetStar(id, s.starred); })
+            .catch(function () { mcSetStar(id, was); MC.toast('Could not update favourite', true); });
+    }
+
+    function mcApplyTag(id, tagId, apply) {
+        return fetch('/api/media/' + id + '/tags/' + tagId, { method: apply ? 'POST' : 'DELETE' })
+            .then(function (r) { if (!r.ok) throw new Error('tag update ' + r.status); return r.json(); })
+            .then(function (s) { mcSetStar(id, s.starred); return s; });
+    }
+
+    function mcCloseTagMenu() {
+        var m = document.getElementById('mc-tag-menu');
+        if (m) m.remove();
+    }
+
+    function mcTagRow(id, t) {
+        var row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'mc-tag-row' + (t.applied ? ' applied' : '');
+        var tick = document.createElement('span');
+        tick.className = 'mc-tag-tick';
+        tick.textContent = '✓';
+        row.appendChild(tick);
+        row.appendChild(document.createTextNode(t.name));
+        row.addEventListener('click', function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            var applying = !row.classList.contains('applied');
+            row.classList.toggle('applied', applying);  // optimistic
+            mcApplyTag(id, t.id, applying).catch(function () {
+                row.classList.toggle('applied', !applying);
+                MC.toast('Could not update tag', true);
+            });
+        });
+        return row;
+    }
+
+    function mcRenderTagMenu(anchor, id, tags) {
+        mcCloseTagMenu();
+        var menu = document.createElement('div');
+        menu.id = 'mc-tag-menu';
+        menu.className = 'mc-path-menu mc-tag-menu';
+        if (!tags.length) {
+            var empty = document.createElement('div');
+            empty.className = 'mc-tag-empty';
+            empty.textContent = 'No tags yet';
+            menu.appendChild(empty);
+        }
+        tags.forEach(function (t) { menu.appendChild(mcTagRow(id, t)); });
+        var add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'mc-tag-new';
+        add.textContent = '+ New tag…';
+        add.addEventListener('click', function (ev) {
+            ev.preventDefault(); ev.stopPropagation();
+            var name = prompt('New tag name:');
+            if (!name || !name.trim()) return;
+            fetch('/api/tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim() }),
+            })
+                .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+                .then(function (res) {
+                    var tag = res.body.tag;  // present on 201 (created) and 409 (existing)
+                    if (!tag) throw new Error(res.body.error || 'could not create tag');
+                    return mcApplyTag(id, tag.id, true).then(function () {
+                        MC.toast((res.status === 201 ? '✓ Created and applied "' : '✓ Applied existing "') + tag.name + '"');
+                        mcCloseTagMenu();
+                    });
+                })
+                .catch(function (err) { MC.toast(err.message || 'Tag create failed', true); });
+        });
+        menu.appendChild(add);
+        document.body.appendChild(menu);
+        var r = anchor.getBoundingClientRect();
+        var left = Math.min(r.left + window.scrollX,
+            window.scrollX + document.documentElement.clientWidth - menu.offsetWidth - 8);
+        menu.style.top = (r.bottom + window.scrollY + 4) + 'px';
+        menu.style.left = Math.max(8, left) + 'px';
+        setTimeout(function () {
+            document.addEventListener('click', function h(ev) {
+                if (menu.contains(ev.target)) return;  // keep open while toggling ticks
+                mcCloseTagMenu();
+                document.removeEventListener('click', h);
+            });
+        }, 0);
+    }
+
+    function mcTagMenu(e, btn) {
+        e.preventDefault(); e.stopPropagation();
+        if (document.getElementById('mc-tag-menu')) { mcCloseTagMenu(); return; }
+        fetch('/api/tags?media_id=' + btn.dataset.id)
+            .then(function (r) { if (!r.ok) throw new Error('tags ' + r.status); return r.json(); })
+            .then(function (data) { mcRenderTagMenu(btn, btn.dataset.id, data.tags); })
+            .catch(function () { MC.toast('Could not load tags', true); });
+    }
+    </script>
+
+    <script>
+    (function () {
+        const btn = document.getElementById('nav-refresh-btn');
+        const msg = document.getElementById('nav-refresh-msg');
+        const stageLabel = { scan: 'Scanning…', enrich: 'Enriching…' };
+        let timer = null;
+
+        function setRunning(stage) {
+            btn.disabled = true;
+            btn.textContent = stageLabel[stage] || 'Refreshing…';
+        }
+        function setIdle(text, isError) {
+            btn.disabled = false;
+            btn.textContent = '⟳ Refresh';
+            msg.textContent = text || '';
+            msg.className = 'nav-refresh-msg' + (isError ? ' error' : '');
+            if (text) setTimeout(function () {
+                if (msg.textContent === text) msg.textContent = '';
+            }, 15000);
+        }
+        function startPolling() {
+            if (!timer) timer = setInterval(function () { poll(true); }, 3000);
+        }
+        function stopPolling() {
+            if (timer) { clearInterval(timer); timer = null; }
+        }
+        async function poll(showResult) {
+            try {
+                const r = await fetch('/api/refresh/status');
+                const s = await r.json();
+                if (s.running) {
+                    setRunning(s.stage);
+                    startPolling();
+                } else {
+                    stopPolling();
+                    if (showResult && s.last_result) {
+                        setIdle((s.last_result.ok ? '✓ ' : '✗ ') + s.last_result.summary, !s.last_result.ok);
+                    } else {
+                        setIdle('');
+                    }
+                }
+            } catch (e) { /* transient (e.g. server reload) — next poll retries */ }
+        }
+        btn.addEventListener('click', async function () {
+            btn.disabled = true;
+            msg.textContent = '';
+            try {
+                const r = await fetch('/api/refresh', { method: 'POST' });
+                const body = await r.json();
+                if (r.status === 409) {
+                    msg.textContent = 'Refresh already running';
+                } else if (!r.ok) {
+                    setIdle('✗ ' + (body.error || 'refresh failed'), true);
+                    return;
+                }
+                poll(true);
+                startPolling();
+            } catch (e) {
+                setIdle('✗ ' + e, true);
+            }
+        });
+        poll(false);  // pick up an already-running refresh on page load
+    })();
+    </script>
 </body>
 </html>

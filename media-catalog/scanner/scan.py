@@ -8,6 +8,7 @@ Usage:
 import os
 import sys
 import hashlib
+import re
 from pathlib import Path
 from guessit import guessit
 from tqdm import tqdm
@@ -22,6 +23,21 @@ DEFAULT_EXTENSIONS = {
     '.mkv', '.mp4', '.avi', '.m4v', '.wmv', '.flv', '.mov',
     '.ts', '.webm', '.mpg', '.mpeg', '.divx', '.ogm', '.iso', '.img',
 }
+
+SEASON_DIR_RE = re.compile(r'^(?:season|s)\s*\d{1,3}$|^series\s+\d{1,3}$', re.IGNORECASE)
+SERIES_DIR_RE = re.compile(r'^(?:series|tv|tv[-_\s]?shows?|shows)(?:\d+)?$', re.IGNORECASE)
+MOVIE_DIR_RE = re.compile(r'^(?:movies?|films?)(?:\d+)?$', re.IGNORECASE)
+SAMPLE_FILE_RE = re.compile(r'(^sample(?:[-._\s]|$)|[-._\s]sample(?:[-._\s]|$))', re.IGNORECASE)
+EPISODE_MARKER_RE = re.compile(
+    r'(?:^|[\s._\-\[])(?:s\d{1,2}e\d{1,3}|\d{1,2}x\d{1,3})(?:$|[\s._\-\]])',
+    re.IGNORECASE,
+)
+RELEASE_TAG_RE = re.compile(
+    r'\b(?:uhd|hdrip|brrip|bdrip|dvdrip|webrip|web[- .]?dl|bluray|blu[- .]?ray|'
+    r'hdtv|xvid|x264|x265|h\.?264|h\.?265|hevc|avc|aac|ac3|ddp|dts|remux|'
+    r'proper|repack|limited|dv|hdr|2160p|1080p|720p|480p)\b',
+    re.IGNORECASE,
+)
 
 
 def get_extensions():
@@ -41,9 +57,42 @@ def find_video_files(directories: list[str], extensions: set[str]) -> list[Path]
             continue
         print(f"  Scanning {root} ...")
         for p in root.rglob("*"):
-            if p.is_file() and p.suffix.lower() in extensions:
+            if p.is_file() and p.suffix.lower() in extensions and not SAMPLE_FILE_RE.search(p.stem):
                 files.append(p)
     return files
+
+
+def _path_has(pattern: re.Pattern, filepath: Path) -> bool:
+    return any(pattern.match(part) for part in filepath.parent.parts)
+
+
+def _has_episode_marker(filename: str) -> bool:
+    return bool(EPISODE_MARKER_RE.search(filename))
+
+
+def _movie_title_from_filename(filename: str, parsed_year: int | None) -> tuple[str | None, int | None]:
+    """Recover movie titles when GuessIt mistakes bare numbers for episodes."""
+    stem = Path(filename).stem
+    stem = re.sub(r'[\[\(][^\]\)]*[\]\)]', ' ', stem)
+    stem = re.sub(r'[._]+', ' ', stem)
+    stem = re.sub(r'\s+', ' ', stem).strip(' -_.')
+
+    release_match = RELEASE_TAG_RE.search(stem)
+    if release_match:
+        stem = stem[:release_match.start()].strip(' -_.')
+
+    year = parsed_year
+    if year and re.search(rf'\b{year}\b', stem):
+        stem = re.sub(rf'\b{year}\b.*$', '', stem).strip(' -_.')
+    else:
+        for match in re.finditer(r'\b(19\d{2}|20[0-3]\d)\b', stem):
+            prefix = stem[:match.start()].strip(' -_.')
+            if prefix:
+                year = int(match.group(1))
+                stem = prefix
+                break
+
+    return (stem or None), year
 
 
 def _title_from_directory(filepath: Path) -> tuple:
@@ -52,18 +101,15 @@ def _title_from_directory(filepath: Path) -> tuple:
     Skips 'Season N' style folders and returns the first ancestor whose
     guessit parse yields a plausible title.
     """
-    import re as _re
-    season_re = _re.compile(r'^(season|series|s)\s*\d+$', _re.IGNORECASE)
-
     for ancestor in filepath.parents:
         name = ancestor.name
         if not name:
             break
-        if season_re.match(name):
+        if SEASON_DIR_RE.match(name) or SERIES_DIR_RE.match(name) or MOVIE_DIR_RE.match(name):
             continue
         dir_info = guessit(name)
         dir_title = dir_info.get("title", "").strip()
-        if dir_title and len(dir_title) >= 2 and not _re.match(r'^\d+$', dir_title):
+        if dir_title and len(dir_title) >= 2 and not re.match(r'^\d+$', dir_title):
             return dir_title, dir_info.get("year")
     return None, None
 
@@ -74,20 +120,32 @@ def parse_filename(filepath: Path) -> dict:
 
     # Determine media type
     g_type = info.get("type", "")
-    if g_type == "episode":
+    explicit_episode_marker = _has_episode_marker(filepath.name)
+    explicit_season_dir = _path_has(SEASON_DIR_RE, filepath)
+    movie_dir = _path_has(MOVIE_DIR_RE, filepath)
+    series_dir = _path_has(SERIES_DIR_RE, filepath)
+    movie_release_misread = g_type == "episode" and movie_dir and not explicit_episode_marker and not explicit_season_dir
+
+    if movie_release_misread:
+        media_type = "movie"
+    elif g_type == "episode":
         media_type = "series"
     elif g_type == "movie":
         media_type = "movie"
+    elif explicit_season_dir or series_dir:
+        media_type = "series"
+    elif movie_dir:
+        media_type = "movie"
     else:
-        # Heuristic: if path contains season/series indicators, treat as series
-        path_lower = str(filepath).lower()
-        if any(x in path_lower for x in ["/season", "/series", "/s0", "/s1", "/s2"]):
-            media_type = "series"
-        else:
-            media_type = "unknown"
+        media_type = "unknown"
 
     title = info.get("title", filepath.stem)
     year = info.get("year")
+    if movie_release_misread:
+        recovered_title, recovered_year = _movie_title_from_filename(filepath.name, year)
+        if recovered_title:
+            title = recovered_title
+        year = recovered_year
 
     # Detect weak titles that need directory fallback:
     #  - all digits (episode number as filename)
@@ -122,8 +180,12 @@ def parse_filename(filepath: Path) -> dict:
         "parsed_title": title,
         "year": year,
         "media_type": media_type,
-        "season": info.get("season") if not isinstance(info.get("season"), list) else info.get("season", [None])[0],
-        "episode": info.get("episode") if not isinstance(info.get("episode"), list) else info.get("episode", [None])[0],
+        "season": None if media_type == "movie" else (
+            info.get("season") if not isinstance(info.get("season"), list) else info.get("season", [None])[0]
+        ),
+        "episode": None if media_type == "movie" else (
+            info.get("episode") if not isinstance(info.get("episode"), list) else info.get("episode", [None])[0]
+        ),
         "resolution": info.get("screen_size"),
         "codec": info.get("video_codec"),
         "source": info.get("source"),

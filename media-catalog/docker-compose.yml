@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: catalog
       POSTGRES_PASSWORD: catalog
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
@@ -20,6 +20,7 @@ services:
     environment:
       DATABASE_URL: postgresql://catalog:catalog@db:5432/media_catalog
       TMDB_API_KEY: ${TMDB_API_KEY}
+      OMDB_API_KEY: ${OMDB_API_KEY}
       HOST_OPENER_URL: http://host.docker.internal:9111
     volumes:
       - ./:/app

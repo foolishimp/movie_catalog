@@ -145,21 +145,37 @@ python cli.py tag 42 remove "favorites"
 
 | Page | URL | Description |
 |---|---|---|
-| Dashboard | `/` | Stats, genre breakdown, year distribution, recent additions |
-| Browse | `/browse` | Full-text search, filter by type/genre/year/rating/director |
+| Dashboard | `/` | Stats, breakdowns, and recent content with one card per series |
+| Browse | `/browse` | Search/filter content; series are grouped into drill-down cards |
 | Detail | `/detail/<id>` | Full metadata, poster, cast, file info, duplicates |
-| Series | `/series` | Series browser with season/episode drill-down |
+| Series | `/series` | Sortable series browser with season/episode drill-down |
 | Duplicates | `/duplicates` | All duplicate groups, file sizes, reclaimable space |
 
-Each card in Browse has three action buttons:
+Movie cards in Browse expose file actions. A grouped series card opens its
+season/episode browser and exposes its folder action instead of pretending one
+episode represents the whole series.
+
+The Browse and Series pages support title, release year, rating, popularity,
+total size, and recently-added ordering. For series, these use show-level
+aggregates; recently added is the newest catalogued file in that show.
+
+Movie file actions include:
 - **▶ VLC** — open the file directly in VLC
 - **📂 Reveal** — open the enclosing folder in Finder with the file selected
 - **🔗 Link** — copy a deep link to the detail page
 
+When browsing from another Windows or macOS computer, the server-only actions
+are replaced by **▶ VLC here**. Use **Local VLC setup** once on that computer;
+afterward the browser launches its local VLC with the catalog's mapped
+`smb://` URI. The generated handler is restricted to the SMB hosts configured
+in `PATH_MAPPINGS`.
+
 ### JSON API
 ```
 GET /api/search?q=inception
+GET /api/browse?sort=recent — paged display cards; series are grouped
 GET /api/stats
+GET /api/open-local-vlc/<id> — launch local-client VLC protocol with mapped SMB URI
 POST /api/open/<id>       — open in VLC
 POST /api/reveal/<id>     — reveal in Finder
 POST /api/tags/<id>       — add/remove tags

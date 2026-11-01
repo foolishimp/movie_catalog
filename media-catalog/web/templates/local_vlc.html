@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Local VLC setup — Media Catalog{% endblock %}
+{% block content %}
+
+<h1>Open media in this computer's VLC</h1>
+<p style="max-width: 760px; color: var(--text-dim); margin: 0.75rem 0 1.25rem;">
+    This one-time setup registers <code>media-catalog-vlc:</code> for your user account.
+    The catalog can then launch VLC on the computer running your browser with the
+    selected file's mapped <code>smb://</code> network URI. It does not ask the server
+    Mac to play the file.
+</p>
+
+<div class="file-info" style="max-width: 760px; margin-bottom: 1rem;">
+    <h2 style="margin-bottom: 0.75rem;">Windows</h2>
+    <ol style="padding-left: 1.25rem; line-height: 1.8;">
+        <li><a class="card-btn" href="/local-vlc/install-windows.ps1">Download the Windows setup</a></li>
+        <li>Open PowerShell in Downloads and run <code>powershell -NoProfile -ExecutionPolicy Bypass -File .\install-media-catalog-vlc.ps1</code>.</li>
+        <li>Return to the catalog and choose <strong>▶ VLC here</strong>. Allow the browser's “Open Media Catalog VLC?” prompt.</li>
+    </ol>
+</div>
+
+<div class="file-info" style="max-width: 760px;">
+    <h2 style="margin-bottom: 0.75rem;">macOS</h2>
+    <ol style="padding-left: 1.25rem; line-height: 1.8;">
+        <li><a class="card-btn" href="/local-vlc/install-macos.sh">Download the macOS setup</a></li>
+        <li>Open Terminal in Downloads and run <code>/bin/zsh ./install-media-catalog-vlc-macos.sh</code>.</li>
+        <li>Return to the catalog and choose <strong>▶ VLC here</strong>. Allow the browser's “Open Media Catalog VLC?” prompt.</li>
+    </ol>
+</div>
+
+<p style="max-width: 760px; color: var(--text-dim); margin-top: 1rem;">
+    For safety, both handlers accept only SMB links to:
+    <strong>{{ allowed_hosts | join(', ') }}</strong>.
+</p>
+
+{% endblock %}

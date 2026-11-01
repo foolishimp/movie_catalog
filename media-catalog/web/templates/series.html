@@ -2,10 +2,24 @@
 {% block title %}Series — Media Catalog{% endblock %}
 {% block content %}
 
-<form method="get" action="/series" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search series..." style="flex: 1; max-width: 400px;">
-    <button type="submit">Search</button>
-    {% if q %}<a href="/series" style="line-height: 2.2rem; color: var(--text-dim);">Clear</a>{% endif %}
+<form method="get" action="/series" style="display: flex; align-items: flex-end; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem;">
+    <div>
+        <label for="series-search">Search</label><br>
+        <input id="series-search" type="text" name="q" value="{{ q }}" placeholder="Search series..." style="width: min(400px, 70vw);">
+    </div>
+    <div>
+        <label for="series-sort">Sort</label><br>
+        <select id="series-sort" name="sort" onchange="this.form.submit()">
+            <option value="title" {{ 'selected' if sort_key == 'title' }}>Title A-Z</option>
+            <option value="year" {{ 'selected' if sort_key == 'year' }}>Release Year (newest)</option>
+            <option value="rating" {{ 'selected' if sort_key == 'rating' }}>Rating</option>
+            <option value="popularity" {{ 'selected' if sort_key == 'popularity' }}>Popularity</option>
+            <option value="size" {{ 'selected' if sort_key == 'size' }}>Total Size</option>
+            <option value="recent" {{ 'selected' if sort_key == 'recent' }}>Recently Added</option>
+        </select>
+    </div>
+    <button type="submit">Apply</button>
+    {% if q %}<a href="/series?sort={{ sort_key }}" style="line-height: 2.2rem; color: var(--text-dim);">Clear search</a>{% endif %}
 </form>
 
 <p style="color: var(--text-dim); margin-bottom: 1rem;">{{ total }} series{{ ' matching "' + q + '"' if q else '' }}</p>
@@ -28,6 +42,12 @@
                     <span style="color: var(--text-dim);">{{ item.season_count }} seasons</span>
                     {% endif %}
                     <span style="color: var(--text-dim);">{{ item.episode_count }} ep</span>
+                    {% if sort_key == 'size' and item.file_size_bytes %}
+                    <span style="color: var(--text-dim);">{{ "%.1f"|format(item.file_size_bytes / 1073741824) }} GB</span>
+                    {% endif %}
+                    {% if sort_key == 'recent' and item.recent_at %}
+                    <span style="color: var(--text-dim);">added {{ item.recent_at.strftime('%Y-%m-%d') }}</span>
+                    {% endif %}
                     {% if item.vote_average %}
                     <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
                     {% endif %}
@@ -35,7 +55,7 @@
             </div>
         </a>
         <div class="card-actions">
-            <button class="card-btn" data-dir="{{ item.directory }}" onclick="copyDir(event,this)">📋 Folder</button>
+            <button class="card-btn" data-dir="{{ item.directory }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path for this machine (right-click for formats)">📋 Folder</button>
         </div>
     </div>
     {% endfor %}
@@ -43,14 +63,14 @@
 
 {% if total_pages > 1 %}
 <div class="pagination">
-    {% if page > 1 %}<a href="/series?q={{ q }}&page={{ page - 1 }}">← Prev</a>{% endif %}
+    {% if page > 1 %}<a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ page - 1 }}">← Prev</a>{% endif %}
     {% for p in range(1, total_pages + 1) %}
         {% if p == page %}<span class="current">{{ p }}</span>
         {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
-        <a href="/series?q={{ q }}&page={{ p }}">{{ p }}</a>
+        <a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ p }}">{{ p }}</a>
         {% elif p == 4 or p == total_pages - 3 %}<span style="color: var(--text-dim);">…</span>{% endif %}
     {% endfor %}
-    {% if page < total_pages %}<a href="/series?q={{ q }}&page={{ page + 1 }}">Next →</a>{% endif %}
+    {% if page < total_pages %}<a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ page + 1 }}">Next →</a>{% endif %}
 </div>
 {% endif %}
 
@@ -66,13 +86,4 @@
 .card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
 .card-btn:hover { color: var(--text); border-color: #888; }
 </style>
-<script>
-function copyDir(e, btn) {
-    e.preventDefault();
-    navigator.clipboard.writeText(btn.dataset.dir).then(() => {
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = '📋 Folder', 1500);
-    });
-}
-</script>
 {% endblock %}

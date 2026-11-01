@@ -27,6 +27,10 @@ OMDB_BASE = "https://www.omdbapi.com/"
 RATE_LIMIT_DELAY = 0.1  # OMDb free tier: 1000/day, ~1 req/sec is fine
 
 
+class OmdbUnavailable(RuntimeError):
+    """The current key cannot serve more requests in this run."""
+
+
 def omdb_get(params: dict) -> dict | None:
     params["apikey"] = OMDB_API_KEY
     try:
@@ -34,10 +38,26 @@ def omdb_get(params: dict) -> dict | None:
         r.raise_for_status()
         data = r.json()
         if data.get("Response") == "False":
+            error = str(data.get("Error", ""))
+            if "request limit reached" in error.lower() or "invalid api key" in error.lower():
+                raise OmdbUnavailable(error or "OMDb rejected the API key")
             return None
         return data
-    except Exception as e:
-        print(f"  OMDb error: {e}")
+    except OmdbUnavailable:
+        raise
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        if status in (401, 403, 429):
+            raise OmdbUnavailable(f"OMDb HTTP {status}") from None
+        print(f"  OMDb HTTP error: {status}")
+        return None
+    except httpx.HTTPError as e:
+        # Exception strings include the full request URL, including apikey.
+        # Log only the exception type so credentials never enter refresh logs.
+        print(f"  OMDb request error: {type(e).__name__}")
+        return None
+    except (ValueError, TypeError) as e:
+        print(f"  OMDb response error: {type(e).__name__}")
         return None
 
 
@@ -306,8 +326,13 @@ def enrich(all_entries: bool = False, limit: int = 0, entry_id: int = None):
 
     enriched = 0
     failed = 0
+    stopped_reason = None
     for entry in tqdm(unique_entries, desc="   Enriching"):
-        metadata = enrich_entry(entry)
+        try:
+            metadata = enrich_entry(entry)
+        except OmdbUnavailable as e:
+            stopped_reason = str(e)
+            break
         if metadata:
             key = f"{(entry['parsed_title'] or entry['title']).lower().strip()}|{entry['year']}|{entry['media_type']}"
             for e in seen[key]:
@@ -321,6 +346,9 @@ def enrich(all_entries: bool = False, limit: int = 0, entry_id: int = None):
     print(f"\n   ✅ Enriched {enriched:,} entries")
     if failed:
         print(f"   ⚠ {failed} titles not found on OMDb")
+    if stopped_reason:
+        print(f"   ⏸ Enrichment paused: {stopped_reason}")
+        print("   Remaining entries stay unenriched and can resume on the next run.")
 
     stats = query("SELECT * FROM catalog_stats")
     if stats:

@@ -77,30 +77,42 @@
 <div class="media-grid" id="mediaGrid">
     {% for item in results %}
     <div class="media-card">
-        <a href="/detail/{{ item.id }}">
+        <a href="{% if item.is_series_card %}/series?show={{ item.norm_title | urlencode }}{% else %}/detail/{{ item.id }}{% endif %}">
             {% if item.poster_path %}
             <img class="poster" src="{{ item.poster_path if item.poster_path.startswith('http') else tmdb_img + '/w342' + item.poster_path }}" alt="{{ item.title }}" loading="lazy">
             {% else %}
-            <div class="no-poster">🎬</div>
+            <div class="no-poster">{{ '📺' if item.is_series_card else '🎬' }}</div>
             {% endif %}
             <div class="info">
-                <h3>{{ item.title }}{% if item.season %}  <span style="color: var(--text-dim); font-weight: 400; font-size: 0.85em;">S{{ '%02d'|format(item.season) }}{% if item.episode %}E{{ '%02d'|format(item.episode) }}{% endif %}</span>{% endif %}</h3>
+                <h3>{{ item.title }}</h3>
                 <div class="meta">
                     <span>{{ item.year or '?' }}</span>
                     <span class="badge badge-{{ item.media_type }}">{{ item.media_type }}</span>
+                    {% if item.is_series_card %}
+                    {% if item.season_count > 1 %}<span style="color: var(--text-dim);">{{ item.season_count }} seasons</span>{% endif %}
+                    <span style="color: var(--text-dim);">{{ item.episode_count }} ep</span>
+                    {% endif %}
                     {% if item.vote_average %}
                     <span class="rating">★ {{ "%.1f"|format(item.vote_average) }}</span>
                     {% endif %}
                 </div>
-                {% if item.resolution %}
+                {% if not item.is_series_card and item.resolution %}
                 <span class="tag tag-resolution" style="margin-top: 0.3rem;">{{ item.resolution }}</span>
                 {% endif %}
             </div>
         </a>
         <div class="card-actions">
-            <button class="card-btn" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
-            <button class="card-btn" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            {% if item.is_series_card %}
+            <button class="card-btn" data-dir="{{ item.directory }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path for this machine (right-click for formats)">📋 Folder</button>
+            {% else %}
+            <button class="mc-star{{ ' starred' if item.starred }}" data-id="{{ item.id }}" onclick="mcToggleStar(event,this)" title="{{ 'Unstar — remove from Favourites' if item.starred else 'Star — add to Favourites' }}">{{ '★' if item.starred else '☆' }}</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="mcTagMenu(event,this)" title="Tags — tick the tags this entry is in">🏷</button>
+            <button class="card-btn server-only" data-id="{{ item.id }}" onclick="openVlc(event,this)">▶ VLC</button>
+            <button class="card-btn local-vlc-only" data-id="{{ item.id }}" onclick="mcOpenLocalVlc(event,this)" title="Open the SMB network URI in VLC on this computer">▶ VLC here</button>
+            <button class="card-btn server-only" data-id="{{ item.id }}" onclick="revealInFinder(event,this)">📂 Reveal</button>
+            <button class="card-btn" data-id="{{ item.id }}" onclick="mcCopyPath(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy file path for this machine (right-click for formats)">⧉ Path</button>
             <button class="card-btn" data-url="{{ request.url.scheme }}://{{ request.url.netloc }}/detail/{{ item.id }}" onclick="copyLink(event,this)">🔗 Link</button>
+            {% endif %}
         </div>
     </div>
     {% endfor %}
@@ -115,21 +127,21 @@
 {% if total_pages > 1 %}
 <div class="pagination">
     {% if page > 1 %}
-    <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ page - 1 }}">← Prev</a>
+    <a href="/browse?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page - 1 }}">← Prev</a>
     {% endif %}
 
     {% for p in range(1, total_pages + 1) %}
         {% if p == page %}
         <span class="current">{{ p }}</span>
         {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
-        <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ p }}">{{ p }}</a>
+        <a href="/browse?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ p }}">{{ p }}</a>
         {% elif p == 4 or p == total_pages - 3 %}
         <span style="color: var(--text-dim);">…</span>
         {% endif %}
     {% endfor %}
 
     {% if page < total_pages %}
-    <a href="/browse?{{ params | dictsort | map('join', '=') | join('&') }}&page={{ page + 1 }}">Next →</a>
+    <a href="/browse?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page + 1 }}">Next →</a>
     {% endif %}
 </div>
 {% endif %}
@@ -219,38 +231,59 @@ const seekThumb = document.getElementById('seekThumb');
 const seekTrack = document.getElementById('seekTrack');
 
 // ── Card renderer ──
+function escapeCardText(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function renderCard(item) {
+    const isSeries = Boolean(item.is_series_card);
+    const title = escapeCardText(item.title);
+    const mediaType = escapeCardText(item.media_type);
     const poster = item.poster_path
         ? (item.poster_path.startsWith('http') ? item.poster_path : TMDB_IMG + '/w342' + item.poster_path)
         : null;
-    const season = item.season
-        ? ' <span style="color:var(--text-dim);font-weight:400;font-size:0.85em;">S' +
-          String(item.season).padStart(2,'0') +
-          (item.episode ? 'E' + String(item.episode).padStart(2,'0') : '') + '</span>'
-        : '';
+    const href = isSeries
+        ? '/series?show=' + encodeURIComponent(item.norm_title || '')
+        : '/detail/' + encodeURIComponent(item.id);
     const rating = item.vote_average
         ? '<span class="rating">★ ' + parseFloat(item.vote_average).toFixed(1) + '</span>'
         : '';
-    const res = item.resolution
-        ? '<span class="tag tag-resolution" style="margin-top:0.3rem;">' + item.resolution + '</span>'
+    const res = !isSeries && item.resolution
+        ? '<span class="tag tag-resolution" style="margin-top:0.3rem;">' + escapeCardText(item.resolution) + '</span>'
         : '';
+    const seriesCounts = isSeries
+        ? (Number(item.season_count) > 1
+            ? '<span style="color:var(--text-dim);">' + Number(item.season_count) + ' seasons</span>'
+            : '') +
+          '<span style="color:var(--text-dim);">' + Number(item.episode_count || 0) + ' ep</span>'
+        : '';
+    const actions = isSeries
+        ? '<button class="card-btn" data-dir="' + escapeCardText(item.directory) + '" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path for this machine (right-click for formats)">📋 Folder</button>'
+        : '<button class="mc-star' + (item.starred ? ' starred' : '') + '" data-id="' + item.id + '" onclick="mcToggleStar(event,this)" title="' + (item.starred ? 'Unstar — remove from Favourites' : 'Star — add to Favourites') + '">' + (item.starred ? '★' : '☆') + '</button>' +
+          '<button class="card-btn" data-id="' + item.id + '" onclick="mcTagMenu(event,this)" title="Tags — tick the tags this entry is in">🏷</button>' +
+          '<button class="card-btn server-only" data-id="' + item.id + '" onclick="openVlc(event,this)">▶ VLC</button>' +
+          '<button class="card-btn local-vlc-only" data-id="' + item.id + '" onclick="mcOpenLocalVlc(event,this)" title="Open the SMB network URI in VLC on this computer">▶ VLC here</button>' +
+          '<button class="card-btn server-only" data-id="' + item.id + '" onclick="revealInFinder(event,this)">📂 Reveal</button>' +
+          '<button class="card-btn" data-id="' + item.id + '" onclick="mcCopyPath(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy file path for this machine (right-click for formats)">⧉ Path</button>' +
+          '<button class="card-btn" data-url="' + location.origin + '/detail/' + item.id + '" onclick="copyLink(event,this)">🔗 Link</button>';
 
     const div = document.createElement('div');
     div.className = 'media-card';
     div.innerHTML =
-        '<a href="/detail/' + item.id + '">' +
+        '<a href="' + href + '">' +
             (poster
-                ? '<img class="poster" src="' + poster + '" alt="' + (item.title||'').replace(/"/g,'&quot;') + '" loading="lazy">'
-                : '<div class="no-poster">🎬</div>') +
-            '<div class="info"><h3>' + (item.title||'') + season + '</h3>' +
-            '<div class="meta"><span>' + (item.year || '?') + '</span>' +
-            '<span class="badge badge-' + item.media_type + '">' + item.media_type + '</span>' +
-            rating + '</div>' + res + '</div></a>' +
-        '<div class="card-actions">' +
-            '<button class="card-btn" data-id="' + item.id + '" onclick="openVlc(event,this)">▶ VLC</button>' +
-            '<button class="card-btn" data-id="' + item.id + '" onclick="revealInFinder(event,this)">📂 Reveal</button>' +
-            '<button class="card-btn" data-url="' + location.origin + '/detail/' + item.id + '" onclick="copyLink(event,this)">🔗 Link</button>' +
-        '</div>';
+                ? '<img class="poster" src="' + escapeCardText(poster) + '" alt="' + title + '" loading="lazy">'
+                : '<div class="no-poster">' + (isSeries ? '📺' : '🎬') + '</div>') +
+            '<div class="info"><h3>' + title + '</h3>' +
+            '<div class="meta"><span>' + escapeCardText(item.year || '?') + '</span>' +
+            '<span class="badge badge-' + mediaType + '">' + mediaType + '</span>' +
+            seriesCounts + rating + '</div>' + res + '</div></a>' +
+        '<div class="card-actions">' + actions + '</div>';
     return div;
 }
 
@@ -437,10 +470,9 @@ function revealInFinder(e, btn) {
 }
 function copyLink(e, btn) {
     e.preventDefault();
-    navigator.clipboard.writeText(btn.dataset.url).then(() => {
-        btn.textContent = 'Copied!';
-        setTimeout(() => btn.textContent = '🔗 Link', 1500);
-    });
+    MC.copyText(btn.dataset.url, 'link');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = '🔗 Link', 1500);
 }
 </script>
 {% endblock %}
