@@ -13,6 +13,7 @@ import sys
 import math
 import json
 import base64
+import contextlib
 import shlex
 import signal
 import asyncio
@@ -1336,8 +1337,15 @@ async def favourites_page(request):
     })
 
 
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    books_web.warm_cache()
+    yield
+
+
 app = Starlette(
     debug=True,
+    lifespan=lifespan,
     routes=[
         Route("/", homepage),
         Route("/browse", browse),

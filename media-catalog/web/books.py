@@ -4,13 +4,17 @@ detail, category listings, covers, favourites/labels, open/reveal and the
 background book scan. Data comes from the books tables written by
 books.scan and books.resolve; nothing here writes resolved fields.
 """
+import asyncio
 import mimetypes
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import zipfile
+from collections import OrderedDict
+from functools import wraps
 from pathlib import Path
 from urllib.parse import quote, quote_plus, urlencode
 
@@ -245,6 +249,68 @@ def filter_chips(params: dict) -> list[dict]:
 # Queries
 # ---------------------------------------------------------------------------
 
+# The grid, category counts and library totals each read the whole catalogue (about 200,000 rows,
+# seconds of work), yet change only when a scan, resolve, star or label writes to these tables.
+# Postgres counts the rows written to each table, so one small query tells whether a kept result
+# still holds. Each result depends only on the tables it reads: starring a book leaves the
+# category counts alone unless the view is filtered to starred books.
+CACHE_SIZE = 64
+_cache: OrderedDict = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def data_version(tables: list[str]) -> int:
+    return query("SELECT COALESCE(sum(n_tup_ins + n_tup_upd + n_tup_del), 0)::bigint AS v"
+                 " FROM pg_stat_user_tables WHERE relname = ANY(%s)", (tables,))[0]["v"]
+
+
+def filter_tables(params) -> list[str]:
+    """Tables that build_where reads beyond books and book_awards."""
+    return (["book_favourites"] if params.get("starred") else []) + \
+           (["book_labels", "tags"] if params.get("label") else [])
+
+
+def _freeze(value):
+    if hasattr(value, "items"):
+        return tuple(sorted((k, str(v)) for k, v in value.items()))
+    return value
+
+
+def cached(tables):
+    """Keep a function's result per arguments until one of tables (a list, or a function of the
+    arguments giving one) is written to."""
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args):
+            key = (fn.__name__,) + tuple(_freeze(a) for a in args)
+            version = data_version(tables(*args) if callable(tables) else tables)   # before fn runs
+            with _cache_lock:
+                hit = _cache.get(key)
+                if hit and hit[0] == version:
+                    _cache.move_to_end(key)
+                    return hit[1]
+            value = fn(*args)
+            with _cache_lock:
+                _cache[key] = (version, value)
+                _cache.move_to_end(key)
+                while len(_cache) > CACHE_SIZE:
+                    _cache.popitem(last=False)
+            return value
+        return wrapper
+    return decorate
+
+
+def warm_cache():
+    """Fill the landing page's results in the background, so the first visit after a start is quick."""
+    def run():
+        try:
+            card_page({}), facets({}), library_stats()
+        except Exception as e:      # the database may still be starting; the first visit fills it instead
+            print(f"   Books cache not warmed: {e}", flush=True)
+    threading.Thread(target=run, daemon=True, name="books-cache-warm").start()
+
+
+@cached(lambda params, per_page=PER_PAGE: ["books", "book_awards", "book_favourites"] + filter_tables(params))
 def card_page(params, per_page: int = PER_PAGE):
     """One page of book cards. Copies of the same work (same work_key) collapse
     into one card represented by its best copy: on disk, in Calibre, most
@@ -278,14 +344,16 @@ def card_page(params, per_page: int = PER_PAGE):
         )
         SELECT c.*, count(*) OVER () AS total, count(*) FILTER (WHERE c.available) OVER () AS on_disk_total,
                EXISTS (SELECT 1 FROM book_favourites bf WHERE bf.book_id = c.id) AS starred,
-               (SELECT array_agg(DISTINCT x ORDER BY x) FROM f f2, unnest(f2.formats) x
-                 WHERE f2.card_key = c.card_key) AS all_formats,
-               (SELECT array_agg(DISTINCT a.award ORDER BY a.award) FROM book_awards a JOIN f f3 ON f3.id = a.book_id
-                 WHERE f3.card_key = c.card_key AND a.result = 'winner') AS wins
+               -- Formats and wins of the card's copies within the filter, found through the work_key
+               -- index for the page's cards only (scanning f for each card took over a second).
+               (SELECT array_agg(DISTINCT x ORDER BY x) FROM books b, unnest(b.formats) x
+                 WHERE (b.work_key = c.card_key OR b.id = c.id) AND {where}) AS all_formats,
+               (SELECT array_agg(DISTINCT a.award ORDER BY a.award) FROM books b JOIN book_awards a ON a.book_id = b.id
+                 WHERE (b.work_key = c.card_key OR b.id = c.id) AND {where} AND a.result = 'winner') AS wins
         FROM cards c
         ORDER BY {order}
         LIMIT %s OFFSET %s
-    """, rank_args + args + [per_page, (page - 1) * per_page])
+    """, rank_args + args + args + args + [per_page, (page - 1) * per_page])
 
     if rows:
         total = rows[0]["total"]
@@ -298,8 +366,8 @@ def card_page(params, per_page: int = PER_PAGE):
     return rows, total, page, total_pages, sort_key
 
 
-def facets(params) -> dict:
-    """Category counts (distinct works) within the current filter, top values per category."""
+@cached(lambda params: ["books", "book_awards"] + filter_tables(params))
+def _facets(params) -> dict:
     where, args = build_where(params)
     rows = query(f"""
         WITH f AS MATERIALIZED (
@@ -384,6 +452,12 @@ def category_values(kind: str, params, find: str = "", order: str = "name") -> l
     """, args + having_args)
 
 
+def facets(params) -> dict:
+    """Category counts (distinct works) within the current filter, top values per category."""
+    return _facets(active_params(params))      # page and sort leave the counts unchanged
+
+
+@cached(["books", "book_files"])
 def library_stats() -> dict:
     return query("""
         SELECT count(DISTINCT COALESCE(work_key, 'id' || id)) AS works,
@@ -449,17 +523,23 @@ templates.env.filters.setdefault("human_size", _human_size)
 templates.env.globals.setdefault("can_read", lambda formats: any(reading.readable(f) for f in formats or []))
 
 
+def _label_counts() -> list[dict]:
+    return query("""
+        SELECT t.name, count(*) AS n FROM tags t JOIN book_labels bl ON bl.tag_id = t.id
+        GROUP BY t.name ORDER BY lower(t.name)
+    """)
+
+
 async def books_page(request):
     params = active_params(request.query_params)
     if request.query_params.get("sort"):
         params["sort"] = request.query_params["sort"]
-    cards, total, page, total_pages, sort_key = card_page(request.query_params)
+    # The queries run side by side in worker threads, so the server keeps answering meanwhile.
+    (cards, total, page, total_pages, sort_key), facet_counts, stats, labels = await asyncio.gather(
+        run_in_threadpool(card_page, request.query_params), run_in_threadpool(facets, request.query_params),
+        run_in_threadpool(library_stats), run_in_threadpool(_label_counts))
     params["sort"] = sort_key
     filters_only = {k: v for k, v in params.items() if k != "sort"}
-    labels = query("""
-        SELECT t.name, count(*) AS n FROM tags t JOIN book_labels bl ON bl.tag_id = t.id
-        GROUP BY t.name ORDER BY lower(t.name)
-    """)
     return templates.TemplateResponse(request, "books.html", {
         "cards": cards,
         "total": total,
@@ -469,8 +549,8 @@ async def books_page(request):
         "sort_labels": {k: v for k, v in SORT_LABELS.items() if k != "relevance" or params.get("q")},
         "params": params,
         "chips": filter_chips(filters_only),
-        "facets": facets(request.query_params),
-        "stats": library_stats(),
+        "facets": facet_counts,
+        "stats": stats,
         "labels": labels,
         "page_prefix": books_url(params) + ("&" if "?" in books_url(params) else "?"),
         "category_qs": urlencode(filters_only),
@@ -541,7 +621,7 @@ async def book_category(request):
     params.pop(cat["param"], None)
     find = (request.query_params.get("find") or "").strip()
     order = "count" if request.query_params.get("order") == "count" else "name"
-    values = category_values(kind, request.query_params, find, order)
+    values = await run_in_threadpool(category_values, kind, request.query_params, find, order)
     for v in values:
         v["label"] = value_label(kind, v["value"])
         v["url"] = books_url(params, **{cat["param"]: v["value"]})
@@ -592,7 +672,7 @@ async def book_cover(request):
 # ---------------------------------------------------------------------------
 
 async def api_books(request):
-    cards, total, page, total_pages, sort_key = card_page(request.query_params)
+    cards, total, page, total_pages, sort_key = await run_in_threadpool(card_page, request.query_params)
     return JSONResponse({"results": json_safe(cards), "total": total, "page": page,
                          "total_pages": total_pages, "sort": sort_key})
 
@@ -833,7 +913,7 @@ async def api_scan_start(request):
 async def api_scan_status(request):
     s = SCAN_JOB.status()
     if not s["running"] and s["last_result"] and s["last_result"]["ok"]:
-        st = library_stats()
+        st = await run_in_threadpool(library_stats)
         s["last_result"] = {"ok": True, "summary": f"{st['works']:,} books, {st['review']:,} need review"}
     return JSONResponse(json_safe(s))
 

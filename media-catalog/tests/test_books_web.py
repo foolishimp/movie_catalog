@@ -84,3 +84,27 @@ def test_nul_characters_are_stripped_from_evidence():
 def test_lone_surrogates_and_non_finite_floats_are_removed():
     assert sanitize_json({"t": "ab\ud800c", "r": float("nan"), "s": [float("inf"), 1.5]}) == \
         {"t": "abc", "r": None, "s": [None, 1.5]}
+
+
+def test_cached_results_last_until_their_tables_change(monkeypatch):
+    from web import books
+    version, calls = {"v": 1}, []
+    monkeypatch.setattr(books, "data_version", lambda tables: version["v"])
+
+    @books.cached(["books"])
+    def count(params):
+        calls.append(params)
+        return len(calls)
+
+    assert count({"a": "1"}) == 1 and count({"a": "1"}) == 1
+    assert count({"a": "2"}) == 2
+    version["v"] = 2                      # a scan, resolve or star wrote to a table
+    assert count({"a": "1"}) == 3
+
+
+def test_category_counts_ignore_page_and_sort(monkeypatch):
+    from web import books
+    monkeypatch.setattr(books, "_facets", lambda params: params)
+    assert books.facets({"page": "7", "sort": "year", "author": "A"}) == {"author": "A"}
+    assert books.filter_tables({"starred": "1"}) == ["book_favourites"]
+    assert books.filter_tables({"author": "A"}) == []
