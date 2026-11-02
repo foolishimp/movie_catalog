@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import pagination %}
 {% block title %}Series — Media Catalog{% endblock %}
 {% block content %}
 
@@ -61,18 +62,7 @@
     {% endfor %}
 </div>
 
-{% if total_pages > 1 %}
-<div class="pagination">
-    {% if page > 1 %}<a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ page - 1 }}">← Prev</a>{% endif %}
-    {% for p in range(1, total_pages + 1) %}
-        {% if p == page %}<span class="current">{{ p }}</span>
-        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
-        <a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ p }}">{{ p }}</a>
-        {% elif p == 4 or p == total_pages - 3 %}<span style="color: var(--text-dim);">…</span>{% endif %}
-    {% endfor %}
-    {% if page < total_pages %}<a href="/series?q={{ q | urlencode }}&amp;sort={{ sort_key }}&amp;page={{ page + 1 }}">Next →</a>{% endif %}
-</div>
-{% endif %}
+{{ pagination('/series?q=' ~ (q | urlencode) ~ '&sort=' ~ sort_key ~ '&', page, total_pages) }}
 
 {% else %}
 <div class="empty-state">
@@ -81,9 +71,4 @@
 </div>
 {% endif %}
 
-<style>
-.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
-.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
-.card-btn:hover { color: var(--text); border-color: #888; }
-</style>
 {% endblock %}

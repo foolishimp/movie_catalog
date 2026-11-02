@@ -1,0 +1,141 @@
+{% extends "_books_base.html" %}
+{% block title %}{{ book.title or 'Book' }} — Library{% endblock %}
+{% block content %}
+<div class="book-detail">
+    <div class="bd-cover book-cover{{ ' is-reference' if not book.available }}" style="--hue: {{ (book.title or '?') | length * 37 % 360 }}">
+        <div class="cover-fallback">
+            <span class="cf-title">{{ book.title or 'Untitled' }}</span>
+            <span class="cf-author">{{ (book.authors or ['Unknown'])[0] }}</span>
+        </div>
+        {% if book.cover_path or book.cover_member %}<img src="/books/cover/{{ book.id }}" alt="" onerror="this.remove()">{% endif %}
+        {% if not book.available %}<span class="ref-banner">Not on disk</span>{% endif %}
+    </div>
+
+    <div class="bd-info">
+        {% if not book.available %}
+        <div class="bd-reference">
+            <strong>Not on disk — this is a reference.</strong>
+            {% if book.library %}Calibre library “{{ book.library }}” catalogued it{% if calibre_added %} on {{ calibre_added }}{% endif %}{% if calibre.formats %} with {{ calibre.formats | map(attribute='format') | join(', ') }}{% endif %}, but those files are no longer on the share.{% else %}Its files are no longer on the share.{% endif %}
+        </div>
+        {% endif %}
+        <h1>{{ book.title or 'Untitled' }}</h1>
+        <div class="bd-authors">
+            by {% for a in book.authors %}<a href="{{ url(author=a) }}">{{ a }}</a>{{ ', ' if not loop.last }}{% else %}<span class="dim">unknown author</span>{% endfor %}
+        </div>
+        {% if book.series %}
+        <div class="bd-series"><a href="{{ url(series=book.series) }}">{{ book.series }}</a>{% if book.series_index is not none %} · book {{ '%g' | format(book.series_index) }}{% endif %}</div>
+        {% endif %}
+
+        <div class="bd-flags">
+            {% if book.swapped %}<span class="bk-badge review" title="The stored record had the title and author the wrong way round">Title and author were swapped in the source record — corrected</span>{% endif %}
+            {% if book.needs_review %}<span class="bk-badge review">Needs review: {{ book.review_reason }}</span>{% endif %}
+        </div>
+
+        <div class="card-actions bd-actions">
+            <button class="mc-star{{ ' starred' if book.starred }}" data-id="{{ book.id }}" data-api="/api/books" onclick="mcToggleStar(event,this)">{{ '★' if book.starred else '☆' }}</button>
+            <button class="card-btn" data-id="{{ book.id }}" data-api="/api/books" onclick="mcTagMenu(event,this)">🏷 Labels</button>
+            {% if book.available %}
+            {% if can_read(files | selectattr('present') | map(attribute='format') | list) %}<a class="card-btn primary" href="/books/{{ book.id }}/read" title="Read in the browser">📖 Read</a>{% endif %}
+            <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ book.id }}/open','✓ Opened')" title="Open in the default app on the server">Open in app</button>
+            <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ book.id }}/reveal','✓ Shown',true)">📂 Reveal</button>
+            {% endif %}
+            {% if book.available %}<button class="card-btn" data-dir="{{ book.directory }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path (right-click for formats)">⧉ Folder</button>{% endif %}
+            {% for l in links %}<a class="card-btn{{ ' primary' if l.primary }}" href="{{ l.url }}" target="_blank" rel="noopener">{{ l.label }} ↗</a>{% endfor %}
+        </div>
+        {% if labels %}<div class="bd-labels">{% for l in labels %}<a class="chip" href="{{ url(label=l) }}">🏷 {{ l }}</a>{% endfor %}</div>{% endif %}
+
+        <dl class="detail-meta">
+            {% if book.pub_year %}<div><dt>Published</dt><dd><a href="{{ url(decade=(book.pub_year // 10 * 10) | string) }}">{{ pub_label }}</a></dd></div>{% endif %}
+            {% if book.publisher %}<div><dt>Publisher</dt><dd><a href="{{ url(publisher=book.publisher) }}">{{ book.publisher }}</a></dd></div>{% endif %}
+            {% if book.rating %}<div><dt>Rating</dt><dd class="rating">{{ '★' * (book.rating | round | int) }}{{ '☆' * (5 - (book.rating | round | int)) }}</dd></div>{% endif %}
+            {% if language_names %}<div><dt>Language</dt><dd>{% for l in book.languages %}<a href="{{ url(language=l) }}">{{ language_names[loop.index0] }}</a>{{ ', ' if not loop.last }}{% endfor %}</dd></div>{% endif %}
+            {% if book.formats %}<div><dt>{{ 'Formats' if book.available else 'Formats (catalogued)' }}</dt><dd>{% for f in book.formats %}<a href="{{ url(format=f) }}">{{ f }}</a> {% endfor %}</dd></div>{% endif %}
+            {% if book.isbn %}<div><dt>ISBN</dt><dd>{{ book.isbn }}</dd></div>{% endif %}
+            {% if book.library %}<div><dt>Library</dt><dd><a href="{{ url(library=book.library) }}">{{ book.library }}</a></dd></div>{% endif %}
+            {% if book.size_bytes and book.available %}<div><dt>Size</dt><dd>{{ book.size_bytes | human_size }} in {{ book.file_count }} file{{ 's' if book.file_count != 1 }}</dd></div>{% endif %}
+        </dl>
+
+        {% if awards %}
+        <h2 class="section-title">Awards</h2>
+        <ul class="bd-awards">
+            {% for a in awards %}
+            <li class="aw-{{ a.result or 'listed' }}">
+                <span class="aw-result">{{ {'winner': '🏆 Won', 'nominee': 'Nominated', 'longlist': 'Longlisted'}.get(a.result, 'Listed') }}</span>
+                <a href="{{ url(award=a.award) }}">{{ a.award }}</a>{% if a.category %} — {{ a.category }}{% endif %}{% if a.year %} ({{ a.year }}){% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if book.subjects %}
+        <div class="bd-subjects">{% for s in book.subjects %}<a class="tag" href="{{ url(subject=s) }}">{{ s }}</a>{% endfor %}</div>
+        {% endif %}
+
+        {% if description %}<div class="bd-description">{{ description }}</div>{% endif %}
+    </div>
+</div>
+
+{% if series_books %}
+<h2 class="section-title">More in {{ book.series }}</h2>
+<ol class="bd-series-list">
+    {% for s in series_books %}
+    <li><span class="idx">{{ '%g' | format(s.series_index) if s.series_index is not none else '·' }}</span><a href="/books/{{ s.id }}">{{ s.title }}</a>{% if s.pub_year %} <span class="dim">({{ s.pub_year }})</span>{% endif %}{% if not s.available %} <span class="bk-badge missing">not on disk</span>{% endif %}</li>
+    {% endfor %}
+</ol>
+{% endif %}
+
+<h2 class="section-title">Files</h2>
+{% if files %}
+<table class="bd-files">
+    <tr><th>Format</th><th>File</th><th>Size</th><th>Metadata</th><th></th></tr>
+    {% for f in files %}
+    <tr class="{{ '' if f.present else 'gone' }}">
+        <td>{{ (f.format or '?') | upper }}</td>
+        <td class="path">{{ f.file_path.rsplit('/', 1)[-1] }}{% if '::' in f.file_path %} <span class="dim">in {{ f.file_path.split('::', 1)[0].rsplit('/', 1)[-1] }}</span>{% endif %}{% if not f.present %} <span class="bk-badge missing">gone</span>{% endif %}{% if f.error %}<div class="dim">{{ f.error }}</div>{% endif %}</td>
+        <td>{{ f.size_bytes | human_size }}</td>
+        <td class="dim">{% if f.meta %}{{ f.meta.title or '—' }}{% if f.meta.authors %} / {{ f.meta.authors | join(', ') }}{% endif %} <span class="src">{{ f.meta_group }}</span>{% endif %}</td>
+        <td class="card-actions">
+            {% if f.present %}
+            {% if can_read([f.format]) %}<a class="card-btn" href="/books/{{ book.id }}/read?file={{ f.id }}" title="Read this file in the browser">Read</a>{% endif %}
+            <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/files/{{ f.id }}/open','✓')" title="Open in the default app on the server">Open</button>
+            <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/files/{{ f.id }}/reveal','✓',true)">📂</button>
+            {% endif %}
+            <button class="card-btn" data-dir="{{ f.file_path }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy file path (right-click for formats)">⧉</button>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p class="dim">No files on disk for this book. Its Calibre folder was <code>{{ book.directory }}</code>.</p>
+{% if calibre.formats %}
+<p class="dim">Calibre recorded: {% for f in calibre.formats %}<code>{{ f.name }}.{{ f.format | lower }}</code> ({{ f.size | human_size }}){{ ', ' if not loop.last }}{% endfor %}</p>
+{% endif %}
+{% endif %}
+
+{% if copies %}
+<h2 class="section-title">Other copies</h2>
+<table class="bd-files">
+    {% for c in copies %}
+    <tr><td><a href="/books/{{ c.id }}">{{ c.title }}</a></td><td>{{ c.authors | join(', ') }}</td><td>{{ c.library or ('loose files' if not c.in_calibre) }}</td><td>{{ c.formats | join(' ') }}</td><td>{% if not c.available %}<span class="bk-badge missing">not on disk</span>{% endif %}</td></tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<details class="bd-provenance">
+    <summary>How this record was resolved</summary>
+    <p class="dim">Title from <strong>{{ book.provenance.title.source if book.provenance.title else '—' }}</strong>,
+       authors from <strong>{{ book.provenance.authors.source if book.provenance.authors else '—' }}</strong>,
+       year from <strong>{{ book.provenance.pub_year or '—' }}</strong>; confidence {{ book.confidence }}.</p>
+    {% if book.provenance.candidates %}
+    <table>
+        <tr><th>Source</th><th>Title</th><th>Authors</th><th>Swapped</th><th>Margin</th></tr>
+        {% for c in book.provenance.candidates %}
+        <tr><td>{{ c.source }}</td><td>{{ c.title }}</td><td>{{ (c.authors or []) | join(', ') }}</td><td>{{ 'yes' if c.swapped }}{{ ' (ambiguous)' if c.ambiguous }}</td><td>{{ c.margin }}</td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% if calibre %}
+    <p class="dim">Calibre: library “{{ calibre.library }}”, id {{ calibre.calibre_id }}, stored as “{{ calibre.title }}” by {{ (calibre.authors or []) | join(' & ') }}{% if calibre.isfdb %}, matched against ISFDB{% endif %}.</p>
+    {% endif %}
+</details>
+{% endblock %}

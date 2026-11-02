@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{# Theme, nav, search and scan button shared by every Books page. #}
+{% block body_class %}theme-books{% endblock %}
+{% block head_extra %}<link rel="stylesheet" href="{{ static_url('books.css') }}">{% endblock %}
+{% block logo %}📚 Library{% endblock %}
+{% block nav_links %}
+        <a href="/books">Books</a>
+        <a href="/books/category/author">Authors</a>
+        <a href="/books/category/series">Series</a>
+        <a href="/books/category/subject">Tags</a>
+        <a href="/books/category/award">Awards</a>
+        <a href="/books?starred=1">Starred</a>
+        <a href="/books?review=1" title="Books whose title or author could not be resolved with confidence">Needs review</a>
+        <a href="/" class="nav-switch" title="Movies and series">🎬 Movies</a>
+{% endblock %}
+{% block search_action %}/books{% endblock %}
+{% block search_placeholder %}Search titles, authors, series, tags…{% endblock %}
+{% block refresh_attrs %}data-start="/api/books/scan" data-status="/api/books/scan/status" data-label="⟳ Rescan books" title="Rescan the book folders (BOOK_DIRS) and re-resolve titles and authors"{% endblock %}
+{% block refresh_label %}⟳ Rescan books{% endblock %}

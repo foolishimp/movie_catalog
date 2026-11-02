@@ -26,12 +26,13 @@ from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.responses import JSONResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
-from starlette.templating import Jinja2Templates
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from db import query, execute
-
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+from web.common import (templates, PER_PAGE, HOST_OPENER_URL, PATH_MAPPINGS, map_path, ensure_mounted,
+                        host_open as _host_open, parse_network_mounts as _parse_network_mounts,
+                        positive_page as _positive_page, pick_sort)
+from web import books as books_web
 
 
 # ---------------------------------------------------------------------------
@@ -72,99 +73,10 @@ ensure_favourites_schema()
 STARRED_SQL = "EXISTS (SELECT 1 FROM favourites f WHERE f.media_id = media.id) AS starred"
 
 TMDB_IMG_BASE = "https://image.tmdb.org/t/p"
-PER_PAGE = 48
-HOST_OPENER_URL = os.getenv("HOST_OPENER_URL", "").rstrip("/")
-
-
-def _parse_network_mounts():
-    """Parse NETWORK_MOUNTS env var into {volume_path: mount_url} dict."""
-    raw = os.getenv("NETWORK_MOUNTS", "")
-    mounts = {}
-    for pair in raw.split(":"):
-        if "=" in pair:
-            vol, url = pair.split("=", 1)
-            # Rejoin if the URL had colons (smb://..., afp://...)
-            mounts[vol] = url
-    # Re-parse properly: split on volume paths
-    mounts = {}
-    for entry in raw.split(":/Volumes/"):
-        if "=" not in entry:
-            continue
-        if not entry.startswith("/"):
-            entry = "/Volumes/" + entry
-        vol, url = entry.split("=", 1)
-        mounts[vol] = url
-    return mounts
-
-
-# ---------------------------------------------------------------------------
-# Universal path mapping: translate server-local mount paths (/Volumes/...)
-# into network forms (smb:// URL, Windows UNC) usable from any LAN client.
-# Configure via PATH_MAPPINGS in .env — a JSON object of
-#   {"<local prefix>": {"smb": "smb://host/share", "unc": "\\\\host\\share"}}
-# Falls back to the defaults below when unset or invalid.
-# ---------------------------------------------------------------------------
-
-DEFAULT_PATH_MAPPINGS = {
-    "/Volumes/Library": {
-        "smb": "smb://nas/Library",
-        "unc": "\\\\nas\\Library",
-    },
-    "/Volumes/Media": {
-        "smb": "smb://nas2/video",
-        "unc": "\\\\nas2\\video",
-    },
-}
-
-
-def _load_path_mappings() -> dict:
-    raw = os.getenv("PATH_MAPPINGS", "").strip()
-    if raw:
-        try:
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                out = {}
-                for prefix, targets in data.items():
-                    if isinstance(targets, dict):
-                        out[str(prefix)] = {
-                            "smb": str(targets.get("smb", "")),
-                            "unc": str(targets.get("unc", "")),
-                        }
-                if out:
-                    return out
-        except (ValueError, TypeError) as e:
-            import logging
-            logging.warning("PATH_MAPPINGS is not valid JSON (%s); using defaults", e)
-    return DEFAULT_PATH_MAPPINGS
-
-
-PATH_MAPPINGS = _load_path_mappings()
-
+# Path mapping (map_path, PATH_MAPPINGS) lives in web/common.py, shared with the Books section.
 LOCAL_VLC_SCHEME = "media-catalog-vlc"
 WINDOWS_VLC_INSTALLER = Path(__file__).with_name("windows_vlc_protocol.ps1")
 MACOS_VLC_INSTALLER = Path(__file__).with_name("macos_vlc_protocol.sh")
-
-
-def map_path(local_path: str) -> dict:
-    """Translate a server-local file/dir path into per-client variants.
-
-    Returns {"mac": <local path>[, "smb": <smb:// URL>, "unc": <\\host\share path>]}.
-    smb/unc are present only when a configured mapping prefix matches.
-    The smb form is percent-encoded so it pastes cleanly into Finder / VLC."""
-    from urllib.parse import quote
-    variants = {"mac": local_path}
-    for prefix in sorted(PATH_MAPPINGS, key=len, reverse=True):
-        p = prefix.rstrip("/")
-        if not (local_path == p or local_path.startswith(p + "/")):
-            continue
-        rest = local_path[len(p):]  # "" or "/…"
-        targets = PATH_MAPPINGS[prefix]
-        if targets.get("smb"):
-            variants["smb"] = targets["smb"].rstrip("/") + quote(rest, safe="/")
-        if targets.get("unc"):
-            variants["unc"] = targets["unc"].rstrip("\\") + rest.replace("/", "\\")
-        break
-    return variants
 
 
 def local_vlc_uri(local_path: str) -> str | None:
@@ -323,56 +235,6 @@ async def api_whoami(request):
     })
 
 
-def _host_open(endpoint: str, file_path: str) -> dict | None:
-    """Delegate an open command to the host opener service. Returns response dict or None."""
-    if not HOST_OPENER_URL:
-        return None
-    import urllib.request
-    import urllib.error
-    import logging
-    try:
-        req = urllib.request.Request(
-            f"{HOST_OPENER_URL}/{endpoint}",
-            data=json.dumps({"file_path": file_path}).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        try:
-            return json.loads(e.read())
-        except Exception:
-            return {"error": f"host opener HTTP {e.code}"}
-    except urllib.error.URLError as e:
-        logging.warning("host opener not reachable at %s: %s", HOST_OPENER_URL, e)
-        return {"error": "host_opener.py not running"}
-    except Exception as e:
-        logging.warning("host opener error: %s", e)
-        return {"error": str(e)}
-
-
-def ensure_mounted(file_path: str) -> bool:
-    """If file_path doesn't exist, try to mount its network volume. Returns True if accessible."""
-    if os.path.exists(file_path):
-        return True
-    import subprocess
-    mounts = _parse_network_mounts()
-    for vol_path, mount_url in mounts.items():
-        if file_path.startswith(vol_path) and not os.path.ismount(vol_path):
-            try:
-                subprocess.run(["open", mount_url], check=True, timeout=15)
-                # Wait briefly for the mount to appear
-                import time
-                for _ in range(10):
-                    if os.path.exists(file_path):
-                        return True
-                    time.sleep(1)
-            except Exception:
-                pass
-    return os.path.exists(file_path)
-
-
 def normalize_vlc_window() -> None:
     """Best-effort recovery for macOS remembering an off-screen VLC window."""
     import subprocess
@@ -504,18 +366,8 @@ CARD_SORT_OPTIONS = {
 }
 
 
-def _positive_page(value) -> int:
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return 1
-
-
 def _card_sort(sort_key, default: str) -> tuple[str, str]:
-    key = str(sort_key or default)
-    if key not in CARD_SORT_OPTIONS:
-        key = default
-    return key, CARD_SORT_OPTIONS[key]
+    return pick_sort(sort_key, default, CARD_SORT_OPTIONS)
 
 
 def _series_card_select(keys_cte: str) -> str:
@@ -1514,6 +1366,7 @@ app = Starlette(
         Route("/local-vlc", local_vlc_setup),
         Route("/local-vlc/install-windows.ps1", windows_vlc_installer),
         Route("/local-vlc/install-macos.sh", macos_vlc_installer),
+        *books_web.routes,
         Mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static"),
     ],
 )

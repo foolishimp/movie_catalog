@@ -352,6 +352,11 @@
         }
         .mc-star:hover { color: var(--yellow); }
         .mc-star.starred { color: var(--yellow); }
+
+        /* Card action buttons (cards on every grid page; detail pages restyle them) */
+        .card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
+        .card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
+        .card-btn:hover { color: var(--text); border-color: #888; }
         .mc-tag-menu { min-width: 200px; max-height: 320px; overflow-y: auto; }
         .mc-tag-menu .mc-tag-empty {
             color: var(--text-dim); font-size: 0.78rem; padding: 0.45rem 0.6rem;
@@ -380,22 +385,26 @@
             .media-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
         }
     </style>
+    {% block head_extra %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
     <nav>
-        <span class="logo">🎬 Media Catalog</span>
+        <span class="logo">{% block logo %}🎬 Media Catalog{% endblock %}</span>
+        {% block nav_links %}
         <a href="/">Dashboard</a>
         <a href="/browse">Browse</a>
         <a href="/series">Series</a>
         <a href="/favourites">Favourites</a>
         <a href="/duplicates">Duplicates</a>
         <a href="/browse?unenriched=1">Unenriched</a>
+        <a href="/books" title="Ebook library">📚 Books</a>
+        {% endblock %}
         <a class="local-vlc-only" href="/local-vlc" title="One-time setup for opening the selected network URI in VLC on this computer">Local VLC setup</a>
-        <form class="search-bar" action="/browse" method="get">
-            <input type="text" name="q" placeholder="Search titles, plots, directors..." value="{{ request.query_params.get('q', '') }}">
+        <form class="search-bar" action="{% block search_action %}/browse{% endblock %}" method="get">
+            <input type="text" name="q" placeholder="{% block search_placeholder %}Search titles, plots, directors...{% endblock %}" value="{{ request.query_params.get('q', '') }}">
             <button type="submit">Search</button>
         </form>
-        <button id="nav-refresh-btn" class="nav-refresh-btn" title="Rescan media folders and refresh metadata from OMDb">⟳ Refresh</button>
+        <button id="nav-refresh-btn" class="nav-refresh-btn" {% block refresh_attrs %}title="Rescan media folders and refresh metadata from OMDb"{% endblock %}>{% block refresh_label %}⟳ Refresh{% endblock %}</button>
         <span id="nav-refresh-msg" class="nav-refresh-msg"></span>
     </nav>
 
@@ -621,19 +630,22 @@
         });
     }
 
+    // Star and tag buttons name their entry API with data-api (default: movies).
+    function mcApi(el) { return (el && el.dataset.api) || '/api/media'; }
+
     function mcToggleStar(e, btn) {
         e.preventDefault(); e.stopPropagation();
         var id = btn.dataset.id;
         var was = btn.classList.contains('starred');
         mcSetStar(id, !was);  // optimistic
-        fetch('/api/media/' + id + '/star', { method: was ? 'DELETE' : 'POST' })
+        fetch(mcApi(btn) + '/' + id + '/star', { method: was ? 'DELETE' : 'POST' })
             .then(function (r) { if (!r.ok) throw new Error('star ' + r.status); return r.json(); })
             .then(function (s) { mcSetStar(id, s.starred); })
             .catch(function () { mcSetStar(id, was); MC.toast('Could not update favourite', true); });
     }
 
-    function mcApplyTag(id, tagId, apply) {
-        return fetch('/api/media/' + id + '/tags/' + tagId, { method: apply ? 'POST' : 'DELETE' })
+    function mcApplyTag(id, tagId, apply, api) {
+        return fetch((api || '/api/media') + '/' + id + '/tags/' + tagId, { method: apply ? 'POST' : 'DELETE' })
             .then(function (r) { if (!r.ok) throw new Error('tag update ' + r.status); return r.json(); })
             .then(function (s) { mcSetStar(id, s.starred); return s; });
     }
@@ -643,7 +655,7 @@
         if (m) m.remove();
     }
 
-    function mcTagRow(id, t) {
+    function mcTagRow(id, t, api) {
         var row = document.createElement('button');
         row.type = 'button';
         row.className = 'mc-tag-row' + (t.applied ? ' applied' : '');
@@ -656,7 +668,7 @@
             ev.preventDefault(); ev.stopPropagation();
             var applying = !row.classList.contains('applied');
             row.classList.toggle('applied', applying);  // optimistic
-            mcApplyTag(id, t.id, applying).catch(function () {
+            mcApplyTag(id, t.id, applying, api).catch(function () {
                 row.classList.toggle('applied', !applying);
                 MC.toast('Could not update tag', true);
             });
@@ -675,7 +687,8 @@
             empty.textContent = 'No tags yet';
             menu.appendChild(empty);
         }
-        tags.forEach(function (t) { menu.appendChild(mcTagRow(id, t)); });
+        var api = mcApi(anchor);
+        tags.forEach(function (t) { menu.appendChild(mcTagRow(id, t, api)); });
         var add = document.createElement('button');
         add.type = 'button';
         add.className = 'mc-tag-new';
@@ -693,7 +706,7 @@
                 .then(function (res) {
                     var tag = res.body.tag;  // present on 201 (created) and 409 (existing)
                     if (!tag) throw new Error(res.body.error || 'could not create tag');
-                    return mcApplyTag(id, tag.id, true).then(function () {
+                    return mcApplyTag(id, tag.id, true, api).then(function () {
                         MC.toast((res.status === 201 ? '✓ Created and applied "' : '✓ Applied existing "') + tag.name + '"');
                         mcCloseTagMenu();
                     });
@@ -719,10 +732,46 @@
     function mcTagMenu(e, btn) {
         e.preventDefault(); e.stopPropagation();
         if (document.getElementById('mc-tag-menu')) { mcCloseTagMenu(); return; }
-        fetch('/api/tags?media_id=' + btn.dataset.id)
+        var url = btn.dataset.api ? btn.dataset.api + '/' + btn.dataset.id + '/tags'
+                                  : '/api/tags?media_id=' + btn.dataset.id;
+        fetch(url)
             .then(function (r) { if (!r.ok) throw new Error('tags ' + r.status); return r.json(); })
             .then(function (data) { mcRenderTagMenu(btn, btn.dataset.id, data.tags); })
             .catch(function () { MC.toast('Could not load tags', true); });
+    }
+
+    // ── Card actions: open on the server Mac, reveal, copy link ────────────
+    // Show a short result on the button, then restore its original label.
+    function mcFlash(btn, text, isError, ms) {
+        if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+        btn.textContent = text;
+        btn.style.color = isError ? '#f66' : '';
+        clearTimeout(btn._mcFlash);
+        btn._mcFlash = setTimeout(function () { btn.textContent = btn.dataset.label; btn.style.color = ''; }, ms || 3000);
+    }
+
+    // POST an open/reveal endpoint. Without an `open` command on the server,
+    // copy the file path (or its folder when copyDir) for the user instead.
+    function mcOpenAction(e, btn, url, okText, copyDir) {
+        e.preventDefault();
+        fetch(url, { method: 'POST' }).then(function (r) { return r.json(); }).then(function (data) {
+            if (data.error === 'no_open_cmd' && data.file_path) {
+                var p = copyDir ? data.file_path.substring(0, data.file_path.lastIndexOf('/')) : data.file_path;
+                MC.copyText(p, copyDir ? 'folder' : 'path');
+                mcFlash(btn, copyDir ? 'Dir copied' : 'Path copied');
+            } else if (data.error) {
+                mcFlash(btn, data.error, true);
+            } else {
+                mcFlash(btn, okText);
+            }
+        }).catch(function () { mcFlash(btn, 'Failed', true); });
+    }
+    function openVlc(e, btn) { mcOpenAction(e, btn, '/api/open/' + btn.dataset.id, btn.dataset.ok || '▶ Playing'); }
+    function revealInFinder(e, btn) { mcOpenAction(e, btn, '/api/reveal/' + btn.dataset.id, btn.dataset.ok || '✓ Opened', true); }
+    function copyLink(e, btn) {
+        e.preventDefault();
+        MC.copyText(btn.dataset.url, 'link');
+        mcFlash(btn, 'Copied!', false, 1500);
     }
     </script>
 
@@ -730,7 +779,11 @@
     (function () {
         const btn = document.getElementById('nav-refresh-btn');
         const msg = document.getElementById('nav-refresh-msg');
-        const stageLabel = { scan: 'Scanning…', enrich: 'Enriching…' };
+        // Book pages point the button at their own job via data-start / data-status.
+        const startUrl = btn.dataset.start || '/api/refresh';
+        const statusUrl = btn.dataset.status || '/api/refresh/status';
+        const idleLabel = btn.dataset.label || '⟳ Refresh';
+        const stageLabel = { scan: 'Scanning…', enrich: 'Enriching…', resolve: 'Resolving…' };
         let timer = null;
 
         function setRunning(stage) {
@@ -739,7 +792,7 @@
         }
         function setIdle(text, isError) {
             btn.disabled = false;
-            btn.textContent = '⟳ Refresh';
+            btn.textContent = idleLabel;
             msg.textContent = text || '';
             msg.className = 'nav-refresh-msg' + (isError ? ' error' : '');
             if (text) setTimeout(function () {
@@ -754,7 +807,7 @@
         }
         async function poll(showResult) {
             try {
-                const r = await fetch('/api/refresh/status');
+                const r = await fetch(statusUrl);
                 const s = await r.json();
                 if (s.running) {
                     setRunning(s.stage);
@@ -773,7 +826,7 @@
             btn.disabled = true;
             msg.textContent = '';
             try {
-                const r = await fetch('/api/refresh', { method: 'POST' });
+                const r = await fetch(startUrl, { method: 'POST' });
                 const body = await r.json();
                 if (r.status === 409) {
                     msg.textContent = 'Refresh already running';

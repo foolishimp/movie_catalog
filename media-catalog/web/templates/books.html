@@ -1,0 +1,82 @@
+{% extends "_books_base.html" %}
+{% from "_macros.html" import pagination, book_card %}
+{% block title %}Books — Library{% endblock %}
+{% block content %}
+<div class="books-layout">
+    <aside class="tag-browser">
+        <div class="tb-quick">
+            <a href="{{ url(starred='1') }}" class="{{ 'on' if params.starred }}">★ Starred</a>
+            <a href="{{ url(award='any', award_result='winner') }}" class="{{ 'on' if params.award_result == 'winner' }}">🏆 Award winners</a>
+            <a href="{{ url(status='available') }}" class="{{ 'on' if params.status == 'available' }}">On disk ({{ '{:,}'.format(stats.works - stats.missing) }})</a>
+            <a href="{{ url(status='missing') }}" class="{{ 'on' if params.status == 'missing' }}">Not on disk — references ({{ '{:,}'.format(stats.missing) }})</a>
+            <a href="{{ url(review='1') }}" class="{{ 'on' if params.review }}">Needs review ({{ stats.review }})</a>
+            <a href="{{ url(swapped='1') }}" class="{{ 'on' if params.swapped }}">Title/author swapped ({{ stats.swapped }})</a>
+            <a href="{{ url(no_author='1') }}" class="{{ 'on' if params.no_author }}">No author ({{ stats.no_author }})</a>
+        </div>
+        {% if labels %}
+        <details open class="tb-cat">
+            <summary>Labels</summary>
+            <ul>{% for l in labels %}<li><a href="{{ url(label=l.name) }}" class="{{ 'on' if params.label == l.name }}"><span>{{ l.name }}</span><span class="n">{{ l.n }}</span></a></li>{% endfor %}</ul>
+        </details>
+        {% endif %}
+        {% for kind, cat in facets.items() %}
+        {% if cat['values'] %}
+        <details class="tb-cat" {{ 'open' if loop.index <= 4 or params.get(cat.param) }}>
+            <summary>{{ cat.label }} <span class="n">{{ cat.distinct }}</span></summary>
+            <ul>
+                {% for v in cat['values'] %}
+                <li><a href="{{ url(**{cat.param: v.value}) }}" class="{{ 'on' if params.get(cat.param) == v.value }}" title="{{ v.label }}"><span>{{ v.label }}</span><span class="n">{{ v.n }}</span></a></li>
+                {% endfor %}
+            </ul>
+            {% if cat.distinct > cat['values'] | length %}
+            <a class="tb-more" href="/books/category/{{ kind }}{{ '?' ~ category_qs if category_qs }}">All {{ cat.distinct }} {{ cat.label | lower }} →</a>
+            {% endif %}
+        </details>
+        {% endif %}
+        {% endfor %}
+    </aside>
+
+    <section class="books-main">
+        <form class="books-toolbar" method="get" action="/books">
+            {% for k, v in params.items() if k not in ('q', 'sort', 'status', 'year_from', 'year_to', 'min_rating') %}
+            <input type="hidden" name="{{ k }}" value="{{ v }}">
+            {% endfor %}
+            <input type="search" name="q" value="{{ params.q or '' }}" placeholder="Title, author, series, tag, ISBN…" class="tb-search">
+            <label>Published <input type="number" name="year_from" value="{{ params.year_from or '' }}" placeholder="from" min="1400" max="2100"> – <input type="number" name="year_to" value="{{ params.year_to or '' }}" placeholder="to" min="1400" max="2100"></label>
+            <label>Rating <select name="min_rating">
+                <option value="">any</option>
+                {% for r in [5, 4, 3, 2, 1] %}<option value="{{ r }}" {{ 'selected' if params.min_rating == r | string }}>{{ '★' * r }}{{ '+' if r < 5 }}</option>{% endfor %}
+            </select></label>
+            <label>Show <select name="status">
+                <option value="">everything</option>
+                <option value="available" {{ 'selected' if params.status == 'available' }}>on disk only</option>
+                <option value="missing" {{ 'selected' if params.status == 'missing' }}>references only (not on disk)</option>
+            </select></label>
+            <label>Sort <select name="sort" onchange="this.form.submit()">
+                {% for k, label in sort_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == sort_key }}>{{ label }}</option>{% endfor %}
+            </select></label>
+            <button type="submit">Apply</button>
+        </form>
+
+        <div class="books-summary">
+            {% set on_disk = cards[0].on_disk_total if cards else 0 %}
+            <span><strong>{{ '{:,}'.format(total) }}</strong> book{{ 's' if total != 1 }}{{ ' matching' if chips }}{% if on_disk != total %} · {{ '{:,}'.format(on_disk) }} on disk · {{ '{:,}'.format(total - on_disk) }} not on disk (references){% endif %}{% if not chips %} · {{ '{:,}'.format(stats.authors) }} authors · {{ '{:,}'.format(stats.series) }} series · {{ '{:,}'.format(stats.files) }} files{% endif %}</span>
+            {% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Remove this filter">{{ c.label }}: {{ c.value }} ✕</a>{% endfor %}
+            {% if chips %}<a class="chip clear" href="/books">Clear all</a>{% endif %}
+        </div>
+
+        {% if cards %}
+        <div class="book-grid">
+            {% for b in cards %}{{ book_card(b) }}{% endfor %}
+        </div>
+        {{ pagination(page_prefix, page, total_pages) }}
+        {% else %}
+        <div class="empty-state">
+            <div class="icon">📚</div>
+            <h2>No books found</h2>
+            <p style="margin-top: 0.5rem;">{% if stats.units %}Try removing a filter.{% else %}The library has not been scanned yet. Set BOOK_DIRS in .env and press ⟳ Rescan books.{% endif %}</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

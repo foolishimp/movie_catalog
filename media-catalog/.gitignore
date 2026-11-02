@@ -5,3 +5,5 @@ __pycache__/
 catalog.csv
 .DS_Store
 *.log
+.books_cache/
+.last_scan

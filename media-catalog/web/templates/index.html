@@ -122,9 +122,6 @@
 {% endif %}
 
 <style>
-.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
-.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
-.card-btn:hover { color: var(--text); border-color: #888; }
 
 .refresh-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
     background: var(--surface); border: 1px solid #333; border-radius: 8px;
@@ -147,27 +144,6 @@
 .refresh-progress-text { font-size: 0.75rem; color: var(--text-dim); font-family: monospace; }
 </style>
 <script>
-function openVlc(e, btn) {
-    e.preventDefault();
-    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(() => {
-        btn.textContent = '▶ Playing';
-        setTimeout(() => btn.textContent = '▶ VLC', 2000);
-    });
-}
-function revealInFinder(e, btn) {
-    e.preventDefault();
-    fetch('/api/reveal/' + btn.dataset.id, {method: 'POST'}).then(() => {
-        btn.textContent = '✓ Opened';
-        setTimeout(() => btn.textContent = '📂 Reveal', 2000);
-    });
-}
-function copyLink(e, btn) {
-    e.preventDefault();
-    MC.copyText(btn.dataset.url, 'link');
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = '🔗 Link', 1500);
-}
-
 // -- Refresh (scan → enrich) ------------------------------------------------
 let refreshPollTimer = null;
 let reloadAfterDone = false;

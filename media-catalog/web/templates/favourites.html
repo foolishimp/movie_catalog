@@ -77,32 +77,4 @@
 {% endif %}
 {% endfor %}
 {% endif %}
-
-<style>
-.card-actions { display: flex; gap: 0.3rem; padding: 0.4rem 0.5rem; }
-.card-btn { flex: 1; font-size: 0.7rem; padding: 0.25rem 0; background: var(--surface); border: 1px solid #444; color: var(--text-dim); border-radius: 4px; cursor: pointer; }
-.card-btn:hover { color: var(--text); border-color: #888; }
-</style>
-<script>
-function openVlc(e, btn) {
-    e.preventDefault();
-    fetch('/api/open/' + btn.dataset.id, {method: 'POST'}).then(r => r.json()).then(data => {
-        if (data.error) {
-            btn.textContent = data.error; btn.style.color = '#f66';
-        } else {
-            btn.textContent = '▶ Playing';
-        }
-        setTimeout(() => { btn.textContent = '▶ VLC'; btn.style.color = ''; }, 3000);
-    }).catch(() => {
-        btn.textContent = 'Failed'; btn.style.color = '#f66';
-        setTimeout(() => { btn.textContent = '▶ VLC'; btn.style.color = ''; }, 3000);
-    });
-}
-function copyLink(e, btn) {
-    e.preventDefault();
-    MC.copyText(btn.dataset.url, 'link');
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = '🔗 Link', 1500);
-}
-</script>
 {% endblock %}

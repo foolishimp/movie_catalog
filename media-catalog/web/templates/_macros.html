@@ -1,0 +1,60 @@
+{# Shared page fragments. Import with {% from "_macros.html" import pagination %}. #}
+
+{# prefix is the page URL up to and including "?" or "&"; links append page=N. #}
+{% macro pagination(prefix, page, total_pages) -%}
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}<a href="{{ prefix }}page={{ page - 1 }}">← Prev</a>{% endif %}
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}<span class="current">{{ p }}</span>
+        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}<a href="{{ prefix }}page={{ p }}">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}<span style="color: var(--text-dim);">…</span>{% endif %}
+    {% endfor %}
+    {% if page < total_pages %}<a href="{{ prefix }}page={{ page + 1 }}">Next →</a>{% endif %}
+</div>
+{% endif %}
+{%- endmacro %}
+
+{# One book card; b is a row from web.books.card_page. #}
+{% macro book_card(b) -%}
+<div class="book-card{{ ' is-missing' if not b.available }}">
+    <a class="book-cover" href="/books/{{ b.id }}" style="--hue: {{ (b.title or '?') | length * 37 % 360 }}">
+        <div class="cover-fallback">
+            <span class="cf-title">{{ b.title or 'Untitled' }}</span>
+            <span class="cf-author">{{ (b.authors or ['Unknown'])[0] }}</span>
+        </div>
+        {% if b.has_cover %}<img src="/books/cover/{{ b.id }}" alt="" loading="lazy" onerror="this.remove()">{% endif %}
+        <span class="cover-badges">
+            {% if b.wins %}<span class="bk-badge award" title="{{ b.wins | join(', ') }} winner">🏆</span>{% endif %}
+            {% if b.copies > 1 %}<span class="bk-badge" title="{{ b.copies }} copies in the library">×{{ b.copies }}</span>{% endif %}
+            {% if b.needs_review %}<span class="bk-badge review" title="Title/author resolution needs review">?</span>{% endif %}
+        </span>
+        {% if not b.available %}<span class="ref-banner" title="Listed in Calibre library {{ b.library }}; no file on disk">Not on disk</span>{% endif %}
+    </a>
+    <div class="book-info">
+        <a class="book-title" href="/books/{{ b.id }}" title="{{ b.title }}">{{ b.title or 'Untitled' }}</a>
+        <div class="book-author">
+            {% for a in (b.authors or [])[:2] %}<a href="/books?author={{ a | urlencode }}">{{ a }}</a>{{ ', ' if not loop.last }}{% endfor %}
+            {% if (b.authors or []) | length > 2 %}<span class="dim"> +{{ b.authors | length - 2 }}</span>{% endif %}
+        </div>
+        {% if b.series %}<div class="book-series"><a href="/books?series={{ b.series | urlencode }}">{{ b.series }}</a>{% if b.series_index is not none %} #{{ '%g' | format(b.series_index) }}{% endif %}</div>{% endif %}
+        <div class="book-meta">
+            <span>{{ b.pub_year or '' }}</span>
+            {% if b.rating %}<span class="rating" title="{{ b.rating }} / 5">{{ '★' * (b.rating | round | int) }}</span>{% endif %}
+            {% if b.available %}<span class="formats">{{ (b.all_formats or b.formats or []) | join(' ') }}</span>
+            {% else %}<span class="formats ref">reference only</span>{% endif %}
+        </div>
+    </div>
+    <div class="card-actions">
+        <button class="mc-star{{ ' starred' if b.starred }}" data-id="{{ b.id }}" data-api="/api/books" onclick="mcToggleStar(event,this)" title="{{ 'Unstar' if b.starred else 'Star' }}">{{ '★' if b.starred else '☆' }}</button>
+        <button class="card-btn" data-id="{{ b.id }}" data-api="/api/books" onclick="mcTagMenu(event,this)" title="Labels">🏷</button>
+        {% if b.available %}
+        {% if can_read(b.all_formats or b.formats) %}<a class="card-btn read" href="/books/{{ b.id }}/read" title="Read in the browser">📖 Read</a>{% endif %}
+        <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ b.id }}/open','✓ Opened')" title="Open in the default app on the server">Open</button>
+        <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ b.id }}/reveal','✓ Shown',true)" title="Reveal in Finder">📂</button>
+        {% endif %}
+        <a class="card-btn" href="{{ b.goodreads }}" target="_blank" rel="noopener" title="Goodreads">GR</a>
+        {% if b.available %}<button class="card-btn" data-dir="{{ b.directory }}" onclick="mcCopyDir(event,this)" oncontextmenu="mcPathMenu(event,this)" title="Copy folder path for this machine (right-click for formats)">⧉</button>{% endif %}
+    </div>
+</div>
+{%- endmacro %}

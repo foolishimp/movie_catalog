@@ -1,0 +1,32 @@
+{% extends "_books_base.html" %}
+{% block title %}{{ cat.label }} — Library{% endblock %}
+{% block content %}
+<div class="category-head">
+    <h1>{{ cat.label }} <span class="dim">{{ '{:,}'.format(values | length) }}</span></h1>
+    <div class="category-tabs">
+        {% for c in categories %}<a href="/books/category/{{ c.kind }}{{ '?' ~ context_qs if context_qs }}" class="{{ 'on' if c.kind == cat.kind }}">{{ c.label }}</a>{% endfor %}
+    </div>
+    <form method="get" class="books-toolbar">
+        {% for k, v in params.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <input type="search" name="find" value="{{ find }}" placeholder="Filter {{ cat.label | lower }}…" class="tb-search" autofocus>
+        <label>Order <select name="order" onchange="this.form.submit()">
+            <option value="name" {{ 'selected' if order == 'name' }}>{{ 'surname' if cat.kind == 'author' else 'name' }}</option>
+            <option value="count" {{ 'selected' if order == 'count' }}>most books</option>
+        </select></label>
+        <button type="submit">Filter</button>
+    </form>
+    {% if chips %}
+    <div class="books-summary">Within: {% for c in chips %}<span class="chip">{{ c.label }}: {{ c.value }}</span>{% endfor %} <a class="chip clear" href="/books/category/{{ cat.kind }}">All books</a></div>
+    {% endif %}
+</div>
+
+{% if values %}
+<ul class="category-list">
+    {% for v in values %}
+    <li><a href="{{ v.url }}"><span>{{ v.label }}</span><span class="n">{{ v.n }}</span></a></li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="empty-state"><div class="icon">📚</div><h2>Nothing here yet</h2></div>
+{% endif %}
+{% endblock %}
