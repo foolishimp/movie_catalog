@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://catalog:catalog@localhost:5432/media_catalog")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://catalog:change-me@localhost:5432/media_catalog")
 
 
 def get_conn():

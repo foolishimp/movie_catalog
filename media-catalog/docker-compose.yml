@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: media_catalog
       POSTGRES_USER: catalog
-      POSTGRES_PASSWORD: catalog
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
       - "5433:5432"
     volumes:
@@ -18,7 +18,7 @@ services:
     depends_on:
       - db
     environment:
-      DATABASE_URL: postgresql://catalog:catalog@db:5432/media_catalog
+      DATABASE_URL: postgresql://catalog:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/media_catalog
       TMDB_API_KEY: ${TMDB_API_KEY}
       OMDB_API_KEY: ${OMDB_API_KEY}
       HOST_OPENER_URL: http://host.docker.internal:9111

@@ -185,7 +185,7 @@ def load_env():
     load_dotenv(env_file)
     DB_URL = os.getenv(
         "DATABASE_URL",
-        "postgresql://catalog:catalog@localhost:5432/media_catalog",
+        "postgresql://catalog:change-me@localhost:5432/media_catalog",
     )
     ok(".env loaded")
 
