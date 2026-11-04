@@ -12,7 +12,10 @@ import threading
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
 from starlette.templating import Jinja2Templates
+
+load_dotenv()
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
@@ -57,23 +60,10 @@ def json_safe(rows):
 # into network forms (smb:// URL, Windows UNC) usable from any LAN client.
 # Configure via PATH_MAPPINGS in .env — a JSON object of
 #   {"<local prefix>": {"smb": "smb://host/share", "unc": "\\\\host\\share"}}
-# Falls back to the defaults below when unset or invalid.
+# No mapping applies when it is unset or invalid.
 # ---------------------------------------------------------------------------
 
-DEFAULT_PATH_MAPPINGS = {
-    "/Volumes/Library": {
-        "smb": "smb://nas/Library",
-        "unc": "\\\\nas\\Library",
-    },
-    "/Volumes/Archive": {
-        "smb": "smb://nas/Archive",
-        "unc": "\\\\nas\\Archive",
-    },
-    "/Volumes/Media": {
-        "smb": "smb://nas2/video",
-        "unc": "\\\\nas2\\video",
-    },
-}
+DEFAULT_PATH_MAPPINGS = {}
 
 
 def _load_path_mappings() -> dict:
@@ -92,7 +82,7 @@ def _load_path_mappings() -> dict:
                 if out:
                     return out
         except (ValueError, TypeError) as e:
-            logging.warning("PATH_MAPPINGS is not valid JSON (%s); using defaults", e)
+            logging.warning("PATH_MAPPINGS is not valid JSON (%s); ignoring it", e)
     return DEFAULT_PATH_MAPPINGS
 
 

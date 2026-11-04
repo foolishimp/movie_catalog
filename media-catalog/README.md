@@ -46,7 +46,8 @@ Edit `.env` — the required fields are:
 | `MEDIA_DIRS` | Colon-separated paths to scan, e.g. `/Volumes/Movies:/Volumes/Series` |
 | `OMDB_API_KEY` | Free key from http://www.omdbapi.com/apikey.aspx (1,000 lookups/day) |
 | `DATABASE_URL` | Already set correctly for the Docker Postgres — no change needed |
-| `BOOK_DIRS` | Optional. Colon-separated ebook folders for the Books tab, e.g. `/Volumes/Archive/Library/lib` |
+| `BOOK_DIRS` | Optional. Colon-separated ebook folders for the Books tab, e.g. `/Volumes/Library/Books` |
+| `GAME_BOOK_FOLDER` | Optional. Name of the folder holding game books, whose credits are always read. Default `rpg` |
 | `EBOOK_CONVERT` | Optional. Calibre's `ebook-convert`, used by the reader for formats browsers can't show; found on `PATH` or in `/Applications/calibre.app` by default |
 | `BOOKS_CACHE_DIR` | Optional. Where the reader keeps converted books; default `.books_cache/` |
 

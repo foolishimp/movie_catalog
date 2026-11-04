@@ -71,10 +71,12 @@ def test_network_mounts_split_on_volume_paths(monkeypatch):
                                       "/Volumes/Archive": "smb://h/Archive"}
 
 
-def test_recovered_share_maps_to_lan_paths():
-    v = map_path("/Volumes/Archive/Library/lib/Books/A B.epub")
-    assert v["smb"] == "smb://nas/Archive/Library/lib/Books/A%20B.epub"
-    assert v["unc"] == "\\\\nas\\Archive\\Library\\lib\\Books\\A B.epub"
+def test_mapped_share_gives_lan_paths(monkeypatch):
+    monkeypatch.setattr("web.common.PATH_MAPPINGS",
+                        {"/Volumes/Archive": {"smb": "smb://nas/Archive", "unc": "\\\\nas\\Archive"}})
+    v = map_path("/Volumes/Archive/lib/Books/A B.epub")
+    assert v["smb"] == "smb://nas/Archive/lib/Books/A%20B.epub"
+    assert v["unc"] == "\\\\nas\\Archive\\lib\\Books\\A B.epub"
 
 
 def test_nul_characters_are_stripped_from_evidence():

@@ -20,14 +20,15 @@ GENERIC_LIBRARY_NAMES = {"calibre", "calibre library", "calibre_lib", "lib", "li
 
 
 def library_label(library_root: str) -> str:
-    """'…/CALIBRE/calibre fiction 1990s' → 'SFF 1990s'; '…/Shared/lib/calibre' → 'Shared lib calibre'."""
+    """'…/calibre/calibre fiction 1990s' → 'fiction 1990s'; '/Volumes/Share/docs/lib/calibre' → 'docs lib calibre'."""
     parts = [p for p in library_root.rstrip("/").split("/") if p]
     name = parts[-1] if parts else library_root
     if name.lower().startswith("calibre ") and len(name) > 8:
         return name[8:]
     if name.lower() in GENERIC_LIBRARY_NAMES:
-        tail = [p for p in parts[-3:] if p.lower() not in ("volumes", "archive")]
-        return " ".join(tail)
+        if parts[0].lower() == "volumes":       # the mount isn't part of the library's name
+            parts = parts[2:] or parts[-1:]
+        return " ".join(parts[-3:])
     return name
 
 
