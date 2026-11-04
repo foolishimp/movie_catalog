@@ -20,7 +20,7 @@
         {% endif %}
         <h1>{{ book.title or 'Untitled' }}</h1>
         <div class="bd-authors">
-            by {% for a in book.authors %}<a href="{{ url(author=a) }}">{{ a }}</a>{{ ', ' if not loop.last }}{% else %}<span class="dim">unknown author</span>{% endfor %}
+            by {% for a in book.authors %}<a href="{{ url(author=a) }}">{{ a }}</a> <a class="gr-link" href="/books/goodreads/author?name={{ a | urlencode }}" target="_blank" rel="noopener" title="{{ a }} on Goodreads">Goodreads ↗</a>{{ ', ' if not loop.last }}{% else %}<span class="dim">unknown author</span>{% endfor %}
         </div>
         {% if book.series %}
         <div class="bd-series"><a href="{{ url(series=book.series) }}">{{ book.series }}</a>{% if book.series_index is not none %} · book {{ '%g' | format(book.series_index) }}{% endif %}</div>
@@ -35,7 +35,7 @@
             <button class="mc-star{{ ' starred' if book.starred }}" data-id="{{ book.id }}" data-api="/api/books" onclick="mcToggleStar(event,this)">{{ '★' if book.starred else '☆' }}</button>
             <button class="card-btn" data-id="{{ book.id }}" data-api="/api/books" onclick="mcTagMenu(event,this)">🏷 Labels</button>
             {% if book.available %}
-            {% if can_read(files | selectattr('present') | map(attribute='format') | list) %}<a class="card-btn primary" href="/books/{{ book.id }}/read" title="Read in the browser">📖 Read</a>{% endif %}
+            {% if can_read(files | selectattr('present') | map(attribute='format') | list) %}<a class="card-btn primary" href="/books/{{ book.id }}/read" target="_blank" title="Read in a new tab">📖 Read</a>{% endif %}
             <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ book.id }}/open','✓ Opened')" title="Open in the default app on the server">Open in app</button>
             <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ book.id }}/reveal','✓ Shown',true)">📂 Reveal</button>
             {% endif %}
@@ -96,7 +96,7 @@
         <td class="dim">{% if f.meta %}{{ f.meta.title or '—' }}{% if f.meta.authors %} / {{ f.meta.authors | join(', ') }}{% endif %} <span class="src">{{ f.meta_group }}</span>{% endif %}</td>
         <td class="card-actions">
             {% if f.present %}
-            {% if can_read([f.format]) %}<a class="card-btn" href="/books/{{ book.id }}/read?file={{ f.id }}" title="Read this file in the browser">Read</a>{% endif %}
+            {% if can_read([f.format]) %}<a class="card-btn" href="/books/{{ book.id }}/read?file={{ f.id }}" target="_blank" title="Read this file in a new tab">Read</a>{% endif %}
             <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/files/{{ f.id }}/open','✓')" title="Open in the default app on the server">Open</button>
             <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/files/{{ f.id }}/reveal','✓',true)">📂</button>
             {% endif %}

@@ -1,5 +1,5 @@
 from books.formats import sanitize_json
-from web.books import books_url, build_where, filter_chips, goodreads_url
+from web.books import books_url, build_where, filter_chips, goodreads_url, pick_goodreads_author
 from web.common import map_path, parse_network_mounts, pick_sort
 
 
@@ -108,3 +108,18 @@ def test_category_counts_ignore_page_and_sort(monkeypatch):
     assert books.facets({"page": "7", "sort": "year", "author": "A"}) == {"author": "A"}
     assert books.filter_tables({"starred": "1"}) == ["book_favourites"]
     assert books.filter_tables({"author": "A"}) == []
+
+
+def test_goodreads_author_page_is_the_suggested_author_of_that_name():
+    page = "https://www.goodreads.com/author/show/"
+    suggestions = [{"author": {"name": "Brian Herbert", "profileUrl": page + "56.Brian_Herbert"}},
+                   {"author": {"name": "Frank Herbert", "profileUrl": page + "58.Frank_Herbert"}}]
+    assert pick_goodreads_author("Frank Herbert", suggestions) == page + "58.Frank_Herbert"
+    assert pick_goodreads_author("Herbert, Frank", suggestions) == page + "58.Frank_Herbert"
+    tolkien = [{"author": {"name": "J.R.R. Tolkien", "profileUrl": page + "656983.J_R_R_Tolkien"}}]
+    assert pick_goodreads_author("J. R. R. Tolkien", tolkien) == page + "656983.J_R_R_Tolkien"
+    assert pick_goodreads_author("Christopher Tolkien", tolkien) is None
+    # Only Goodreads author pages are followed.
+    assert pick_goodreads_author("Frank Herbert", [{"author": {"name": "Frank Herbert",
+                                                               "profileUrl": "https://example.com/"}}]) is None
+    assert pick_goodreads_author("Frank Herbert", {"error": "busy"}) is None

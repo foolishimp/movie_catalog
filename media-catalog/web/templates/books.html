@@ -1,5 +1,5 @@
 {% extends "_books_base.html" %}
-{% from "_macros.html" import pagination, book_card %}
+{% from "_macros.html" import pagination, book_card, series_stack %}
 {% block title %}Books — Library{% endblock %}
 {% block content %}
 <div class="books-layout">
@@ -38,7 +38,7 @@
 
     <section class="books-main">
         <form class="books-toolbar" method="get" action="/books">
-            {% for k, v in params.items() if k not in ('q', 'sort', 'status', 'year_from', 'year_to', 'min_rating') %}
+            {% for k, v in params.items() if k not in ('q', 'sort', 'stack', 'status', 'year_from', 'year_to', 'min_rating') %}
             <input type="hidden" name="{{ k }}" value="{{ v }}">
             {% endfor %}
             <input type="search" name="q" value="{{ params.q or '' }}" placeholder="Title, author, series, tag, ISBN…" class="tb-search">
@@ -55,6 +55,12 @@
             <label>Sort <select name="sort" onchange="this.form.submit()">
                 {% for k, label in sort_labels.items() %}<option value="{{ k }}" {{ 'selected' if k == sort_key }}>{{ label }}</option>{% endfor %}
             </select></label>
+            {% if not params.q and not params.series %}
+            <label>Series <select name="stack" onchange="this.form.submit()">
+                <option value="">stacked</option>
+                <option value="0" {{ 'selected' if params.stack == '0' }}>each book</option>
+            </select></label>
+            {% endif %}
             <button type="submit">Apply</button>
         </form>
 
@@ -63,11 +69,12 @@
             <span><strong>{{ '{:,}'.format(total) }}</strong> book{{ 's' if total != 1 }}{{ ' matching' if chips }}{% if on_disk != total %} · {{ '{:,}'.format(on_disk) }} on disk · {{ '{:,}'.format(total - on_disk) }} not on disk (references){% endif %}{% if not chips %} · {{ '{:,}'.format(stats.authors) }} authors · {{ '{:,}'.format(stats.series) }} series · {{ '{:,}'.format(stats.files) }} files{% endif %}</span>
             {% for c in chips %}<a class="chip" href="{{ c.remove }}" title="Remove this filter">{{ c.label }}: {{ c.value }} ✕</a>{% endfor %}
             {% if chips %}<a class="chip clear" href="/books">Clear all</a>{% endif %}
+            {% if params.author %}<a class="chip" href="/books/goodreads/author?name={{ params.author | urlencode }}" target="_blank" rel="noopener">{{ params.author }} on Goodreads ↗</a>{% endif %}
         </div>
 
         {% if cards %}
         <div class="book-grid">
-            {% for b in cards %}{{ book_card(b) }}{% endfor %}
+            {% for b in cards %}{{ series_stack(b) if b.stack else book_card(b) }}{% endfor %}
         </div>
         {{ pagination(page_prefix, page, total_pages) }}
         {% else %}

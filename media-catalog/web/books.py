@@ -5,6 +5,7 @@ background book scan. Data comes from the books tables written by
 books.scan and books.resolve; nothing here writes resolved fields.
 """
 import asyncio
+import json
 import mimetypes
 import os
 import re
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.request
 import zipfile
 from collections import OrderedDict
 from functools import wraps
@@ -19,13 +21,13 @@ from pathlib import Path
 from urllib.parse import quote, quote_plus, urlencode
 
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 from db import execute, query
 from books import reading
 from books.formats import split_member
-from books.naming import html_to_text
+from books.naming import html_to_text, norm_name
 from web.common import (BackgroundJob, PER_PAGE, ensure_mounted, host_open, json_safe,
                         pick_sort, positive_page, templates)
 
@@ -70,8 +72,10 @@ FILTER_KEYS = ("q", "author", "series", "subject", "publisher", "language", "for
 SORT_OPTIONS = {
     "relevance": "best_rank DESC, sort_title ASC NULLS LAST, id",
     "title": "sort_title ASC NULLS LAST, id",
-    "author": "author_sort ASC NULLS LAST, series ASC NULLS LAST, series_index ASC NULLS LAST, sort_title ASC NULLS LAST, id",
-    "series": "series ASC NULLS LAST, series_index ASC NULLS LAST, sort_title ASC NULLS LAST, id",
+    # Within a series: by number, then (no number, or the same one) by publication.
+    "author": "author_sort ASC NULLS LAST, series ASC NULLS LAST, series_index ASC NULLS LAST, pubdate ASC NULLS LAST, "
+              "sort_title ASC NULLS LAST, id",
+    "series": "series ASC NULLS LAST, series_index ASC NULLS LAST, pubdate ASC NULLS LAST, sort_title ASC NULLS LAST, id",
     "year": "pub_year DESC NULLS LAST, sort_title ASC NULLS LAST, id",
     "oldest": "pub_year ASC NULLS LAST, sort_title ASC NULLS LAST, id",
     "rating": "rating DESC NULLS LAST, sort_title ASC NULLS LAST, id",
@@ -188,7 +192,7 @@ def active_params(params) -> dict:
 
 def books_url(params: dict, **changes) -> str:
     """/books URL for params with changes applied (None removes a key)."""
-    merged = {k: v for k, v in params.items() if k in FILTER_KEYS + ("sort",)}
+    merged = {k: v for k, v in params.items() if k in FILTER_KEYS + ("sort", "stack")}
     for k, v in changes.items():
         if v is None:
             merged.pop(k, None)
@@ -314,9 +318,12 @@ def warm_cache():
 def card_page(params, per_page: int = PER_PAGE):
     """One page of book cards. Copies of the same work (same work_key) collapse
     into one card represented by its best copy: on disk, in Calibre, most
-    confident, most files."""
+    confident, most files. Unless stack=0, a search or a series filter, the
+    works of a series then stack into one card, shown by the first of the
+    series, that opens the series."""
     where, args = build_where(params)
     q = (params.get("q") or "").strip()
+    stacking = params.get("stack") != "0" and not q and not params.get("series")
     default = "relevance" if q else "series" if params.get("series") else "author" if params.get("author") else "title"
     sort_key, order = pick_sort(params.get("sort"), default, SORT_OPTIONS)
     if sort_key == "relevance" and not q:
@@ -324,12 +331,14 @@ def card_page(params, per_page: int = PER_PAGE):
     page = positive_page(params.get("page"))
     rank = "ts_rank(b.tsv, websearch_to_tsquery('english', %s))" if q else "0"
     rank_args = [q] if q else []
+    stack_key = "CASE WHEN %s AND series IS NOT NULL THEN 's:' || series ELSE card_key END"
 
     rows = query(f"""
         WITH f AS MATERIALIZED (
             SELECT b.id, COALESCE(b.work_key, 'id' || b.id) AS card_key,
                    COALESCE(b.title, regexp_replace(b.directory, '^.*/', '')) AS title,
-                   b.sort_title, b.authors, b.author_sort, b.series, b.series_index, b.pub_year, b.rating,
+                   b.sort_title AS own_sort_title, b.authors, b.author_sort, b.series, b.series_index, b.pub_year,
+                   b.pubdate, b.rating,
                    b.formats, b.available, b.cover_path IS NOT NULL OR b.cover_member IS NOT NULL AS has_cover,
                    b.library, b.needs_review, b.swapped, b.added_at, b.calibre IS NOT NULL AS in_calibre,
                    b.confidence, b.file_count, b.directory, b.isbn, b.goodreads_id, {rank} AS rank
@@ -341,8 +350,25 @@ def card_page(params, per_page: int = PER_PAGE):
                    max(rank) OVER (PARTITION BY card_key) AS best_rank
             FROM f
             ORDER BY card_key, available DESC, in_calibre DESC, confidence DESC NULLS LAST, file_count DESC, id
+        ),
+        stacks AS (
+            SELECT DISTINCT ON (stack_key) *,
+                   count(*) OVER w AS stack_size, bool_or(available) OVER w AS stack_available,
+                   min(pub_year) OVER w AS first_year, max(pub_year) OVER w AS last_year,
+                   min(author_sort) OVER w <> max(author_sort) OVER w AS various_authors
+            FROM (SELECT *, {stack_key} AS stack_key FROM cards) c
+            WINDOW w AS (PARTITION BY stack_key)
+            ORDER BY stack_key, series_index ASC NULLS LAST, pubdate ASC NULLS LAST, own_sort_title ASC NULLS LAST, id
+        ),
+        shown AS (
+            SELECT *, CASE WHEN stack_size > 1
+                           THEN regexp_replace(trim(regexp_replace(lower(series), '[^[:alnum:]]+', ' ', 'g')),
+                                               '^(the|a|an) ', '')
+                           ELSE own_sort_title END AS sort_title
+            FROM stacks
         )
-        SELECT c.*, count(*) OVER () AS total, count(*) FILTER (WHERE c.available) OVER () AS on_disk_total,
+        SELECT c.*, count(*) OVER () AS shown_total,
+               (SELECT count(*) FROM cards) AS total, (SELECT count(*) FROM cards WHERE available) AS on_disk_total,
                EXISTS (SELECT 1 FROM book_favourites bf WHERE bf.book_id = c.id) AS starred,
                -- Formats and wins of the card's copies within the filter, found through the work_key
                -- index for the page's cards only (scanning f for each card took over a second).
@@ -350,19 +376,26 @@ def card_page(params, per_page: int = PER_PAGE):
                  WHERE (b.work_key = c.card_key OR b.id = c.id) AND {where}) AS all_formats,
                (SELECT array_agg(DISTINCT a.award ORDER BY a.award) FROM books b JOIN book_awards a ON a.book_id = b.id
                  WHERE (b.work_key = c.card_key OR b.id = c.id) AND {where} AND a.result = 'winner') AS wins
-        FROM cards c
+        FROM shown c
         ORDER BY {order}
         LIMIT %s OFFSET %s
-    """, rank_args + args + args + args + [per_page, (page - 1) * per_page])
+    """, rank_args + args + [stacking] + args + args + [per_page, (page - 1) * per_page])
 
     if rows:
-        total = rows[0]["total"]
+        total, shown = rows[0]["total"], rows[0]["shown_total"]
     else:
-        total = query(f"SELECT count(DISTINCT COALESCE(b.work_key, 'id' || b.id)) AS n FROM books b WHERE {where}",
-                      args)[0]["n"]
+        work = "COALESCE(b.work_key, 'id' || b.id)"
+        counts = query(f"""SELECT count(DISTINCT {work}) AS n,
+                                  count(DISTINCT CASE WHEN %s AND b.series IS NOT NULL THEN 's:' || b.series
+                                                      ELSE {work} END) AS shown
+                           FROM books b WHERE {where}""", [stacking] + args)[0]
+        total, shown = counts["n"], counts["shown"]
     for r in rows:
         r["goodreads"] = goodreads_url(r)
-    total_pages = max(1, -(-total // per_page))
+        r["stack"] = r["stack_size"] > 1
+        if r["stack"]:
+            r["stack_url"] = books_url(params, series=r["series"], sort=None, stack=None)
+    total_pages = max(1, -(-shown // per_page))
     return rows, total, page, total_pages, sort_key
 
 
@@ -498,6 +531,48 @@ def external_links(book) -> list[dict]:
     return links
 
 
+# Goodreads has no author lookup by name; the suggestions under its own search box
+# name each book's author with their page. Asked only when an author link is clicked.
+GOODREADS_SUGGEST = "https://www.goodreads.com/book/auto_complete"
+GOODREADS_AUTHOR_PAGE = "https://www.goodreads.com/author/show/"
+USER_AGENT = "media-catalog/1.0 (personal library catalogue)"
+_goodreads_authors: dict[str, str | None] = {}
+
+
+def goodreads_author_search(name: str) -> str:
+    return "https://www.goodreads.com/search?" + urlencode({"q": name, "search_type": "books",
+                                                            "search[field]": "author"})
+
+
+def pick_goodreads_author(name: str, suggestions: list) -> str | None:
+    """Page of the suggested author who is this author: the same name ignoring spaces and
+    punctuation ('J.R.R. Tolkien' / 'J. R. R. Tolkien'), else the same surname and first initial."""
+    want = norm_name(name).split()
+    if not isinstance(suggestions, list):
+        return None
+    authors = [(norm_name(a.get("name")).split(), a.get("profileUrl") or "")
+               for a in (s.get("author") or {} for s in suggestions if isinstance(s, dict)) if isinstance(a, dict)]
+    authors = [(got, url) for got, url in authors if got and url.startswith(GOODREADS_AUTHOR_PAGE)]
+    if not want:
+        return None
+    return (next((url for got, url in authors if "".join(got) == "".join(want)), None)
+            or next((url for got, url in authors if got[-1] == want[-1] and got[0][0] == want[0][0]), None))
+
+
+def goodreads_author_url(name: str) -> str:
+    """The author's Goodreads page; Goodreads' author search when it suggests no one of that
+    name or does not answer."""
+    if name not in _goodreads_authors:
+        req = urllib.request.Request(f"{GOODREADS_SUGGEST}?{urlencode({'format': 'json', 'q': name})}",
+                                     headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                _goodreads_authors[name] = pick_goodreads_author(name, json.load(resp))
+        except (OSError, ValueError):
+            return goodreads_author_search(name)
+    return _goodreads_authors[name] or goodreads_author_search(name)
+
+
 def _best_file(book_id: int) -> dict | None:
     files = query("SELECT id, file_path, format FROM book_files WHERE book_id = %s AND present", (book_id,))
     if not files:
@@ -532,8 +607,9 @@ def _label_counts() -> list[dict]:
 
 async def books_page(request):
     params = active_params(request.query_params)
-    if request.query_params.get("sort"):
-        params["sort"] = request.query_params["sort"]
+    for key in ("sort", "stack"):
+        if request.query_params.get(key):
+            params[key] = request.query_params[key]
     # The queries run side by side in worker threads, so the server keeps answering meanwhile.
     (cards, total, page, total_pages, sort_key), facet_counts, stats, labels = await asyncio.gather(
         run_in_threadpool(card_page, request.query_params), run_in_threadpool(facets, request.query_params),
@@ -585,11 +661,12 @@ async def book_detail(request):
         ORDER BY lower(t.name)
     """, (book_id,))
     series_books = query("""
-        SELECT DISTINCT ON (COALESCE(work_key, 'id' || id)) id, title, series_index, pub_year, available
+        SELECT DISTINCT ON (COALESCE(work_key, 'id' || id)) id, title, series_index, pub_year, pubdate, available
         FROM books WHERE series = %s AND NOT hidden AND id <> %s
         ORDER BY COALESCE(work_key, 'id' || id), available DESC, id
     """, (book["series"], book_id)) if book["series"] else []
-    series_books.sort(key=lambda r: (r["series_index"] is None, r["series_index"] or 0, r["title"] or ""))
+    series_books.sort(key=lambda r: (r["series_index"] is None, r["series_index"] or 0,
+                                     r["pubdate"] is None, r["pubdate"] or 0, r["title"] or ""))
     description = html_to_text(book["description"]) if book["description"] else ""
     cal = book["calibre"] or {}
     pubdate = book["pubdate"]
@@ -610,6 +687,13 @@ async def book_detail(request):
         "language_names": [LANGUAGE_NAMES.get(l, l) for l in book["languages"] or []],
         "url": lambda **kw: books_url({}, **kw),
     })
+
+
+async def goodreads_author(request):
+    name = (request.query_params.get("name") or "").strip()
+    if not name:
+        return RedirectResponse("https://www.goodreads.com/")
+    return RedirectResponse(await run_in_threadpool(goodreads_author_url, name))
 
 
 async def book_category(request):
@@ -927,6 +1011,7 @@ routes = [
     Route("/books", books_page),
     Route("/books/category/{kind}", book_category),
     Route("/books/cover/{id:int}", book_cover),
+    Route("/books/goodreads/author", goodreads_author),
     Route("/books/{id:int}", book_detail),
     Route("/books/{id:int}/read", book_reader),
     Route("/books/files/{file_id:int}/content/{name:str}", book_file_content),

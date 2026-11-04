@@ -15,6 +15,35 @@
 {% endif %}
 {%- endmacro %}
 
+{# A series stacked into one card, shown by its first book; opens the series in order. #}
+{% macro series_stack(b) -%}
+<div class="book-card is-stack{{ ' is-missing' if not b.stack_available }}">
+    <a class="book-cover" href="{{ b.stack_url }}" style="--hue: {{ b.series | length * 37 % 360 }}" title="Open the {{ b.series }} series">
+        <div class="cover-fallback">
+            <span class="cf-title">{{ b.series }}</span>
+            <span class="cf-author">{{ 'Various authors' if b.various_authors else (b.authors or ['Unknown'])[0] }}</span>
+        </div>
+        {% if b.has_cover %}<img src="/books/cover/{{ b.id }}" alt="" loading="lazy" onerror="this.remove()">{% endif %}
+        <span class="cover-badges"><span class="bk-badge stack">{{ b.stack_size }} books</span></span>
+        {% if not b.stack_available %}<span class="ref-banner">Not on disk</span>{% endif %}
+    </a>
+    <div class="book-info">
+        <a class="book-title" href="{{ b.stack_url }}" title="{{ b.series }}">{{ b.series }}</a>
+        <div class="book-author">
+            {% if b.various_authors %}<span class="dim">Various authors</span>
+            {% else %}{% for a in (b.authors or [])[:2] %}<a href="/books?author={{ a | urlencode }}">{{ a }}</a>{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+        </div>
+        <div class="book-series">Series · {{ b.stack_size }} books</div>
+        <div class="book-meta">
+            <span>{% if b.first_year %}{{ b.first_year }}{% if b.last_year != b.first_year %}–{{ b.last_year }}{% endif %}{% endif %}</span>
+        </div>
+    </div>
+    <div class="card-actions">
+        <a class="card-btn read" href="{{ b.stack_url }}">Open series ›</a>
+    </div>
+</div>
+{%- endmacro %}
+
 {# One book card; b is a row from web.books.card_page. #}
 {% macro book_card(b) -%}
 <div class="book-card{{ ' is-missing' if not b.available }}">
@@ -49,7 +78,7 @@
         <button class="mc-star{{ ' starred' if b.starred }}" data-id="{{ b.id }}" data-api="/api/books" onclick="mcToggleStar(event,this)" title="{{ 'Unstar' if b.starred else 'Star' }}">{{ '★' if b.starred else '☆' }}</button>
         <button class="card-btn" data-id="{{ b.id }}" data-api="/api/books" onclick="mcTagMenu(event,this)" title="Labels">🏷</button>
         {% if b.available %}
-        {% if can_read(b.all_formats or b.formats) %}<a class="card-btn read" href="/books/{{ b.id }}/read" title="Read in the browser">📖 Read</a>{% endif %}
+        {% if can_read(b.all_formats or b.formats) %}<a class="card-btn read" href="/books/{{ b.id }}/read" target="_blank" title="Read in a new tab">📖 Read</a>{% endif %}
         <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ b.id }}/open','✓ Opened')" title="Open in the default app on the server">Open</button>
         <button class="card-btn server-only" onclick="mcOpenAction(event,this,'/api/books/{{ b.id }}/reveal','✓ Shown',true)" title="Reveal in Finder">📂</button>
         {% endif %}
