@@ -8,3 +8,4 @@ catalog.csv
 .books_cache/
 .last_scan
 .enrich_failures*.json
+tools/data/

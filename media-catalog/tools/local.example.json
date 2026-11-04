@@ -1,0 +1,73 @@
+{
+ "main_nas": "nas1",
+ "backup_nas": "nas2",
+ "backup_disk": "USB disk",
+ "target": "/Volumes/Library/Books",
+ "library_main": "/Volumes/Archive/lib/",
+ "library_mirror": "/Volumes/Old/lib/",
+ "second_library_parent": "/Volumes/Old/",
+ "main_label": "Archive/lib",
+ "mirror_label": "Old/lib",
+ "library_roots": [
+  "/Volumes/Archive/lib/zipped"
+ ],
+ "calibre_dbs": [
+  "/Volumes/Archive/lib/calibre/metadata.db"
+ ],
+ "decade_root": "/Volumes/Archive/lib/calibre/fiction ",
+ "decade_label": "fiction",
+ "all_decades": [
+  1990,
+  2000
+ ],
+ "missing_decades": [
+  1990,
+  2000
+ ],
+ "extra_db": "/Volumes/Old/calibre/metadata.db",
+ "search_roots": [
+  "/Volumes/Archive",
+  "/Volumes/Old"
+ ],
+ "inventory_roots": [
+  "/Volumes/Archive"
+ ],
+ "search_skip_names": [
+  "backups-to-skip"
+ ],
+ "places": [
+  [
+   "/Volumes/Archive",
+   "nas1"
+  ],
+  [
+   "/Volumes/Old",
+   "nas2"
+  ]
+ ],
+ "game_folder": "rpg",
+ "games": {
+  "dnd": "D&D"
+ },
+ "technical_folders": [
+  "nonfiction/computing"
+ ],
+ "personal_dirs": [
+  "/folder-of-private-papers"
+ ],
+ "personal_name_pattern": "words|that|mark|private|papers",
+ "looks_like": [
+  [
+   "folder/name",
+   "What this folder seems to hold"
+  ]
+ ],
+ "target_note": "A note on the proposed folders.",
+ "shelf_note": "A note on how shelves are chosen.",
+ "personal_label": "Private papers found among the books: left where they are",
+ "not_scanned_note": "A note on the folders not scanned.",
+ "private_terms": [
+  "names",
+  "that must never appear in git"
+ ]
+}
